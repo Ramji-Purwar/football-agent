@@ -1,466 +1,519 @@
 # game.md: The 5-a-Side Football Game and the Learning Agent
 
-This document explains the whole project scenario in detail: what the game is, how every mechanic works, what the learning agent sees and does, what we vary in experiments, and what we measure. It is written so that anyone on the team can read it, understand the full picture, and start coding. The companion file `opponent.md` explains how to build the opponent team.
+This document explains the whole project in detail: what the game is, how every mechanic works, what the learning agent sees and does, what we vary in experiments, and what we measure. Read this first. The companion file `opponent.md` covers the rule-based opponent team. See `codebase.md` for the code map and `training.md` for the training protocol.
 
-**Rule for numbers:** no numeric constant is fixed yet. Every tunable value is written as a named parameter (for example `V_PLAYER`, `R_VISION`). They are all listed in Section 17 and are decided in Phase 0 (calibration), or taken from the reference papers where they exist.
+**Parameter status:** all numeric constants are now filled in from `configs/default.yaml`. The source of truth is always the config file; this document reflects the current calibrated defaults.
 
 ---
 
 ## 1. The Big Picture
 
-We build a small football game and train a team of AI players to play it.
+We build a small 2D football game and train a team of AI players to play it.
 
-- Two teams of **5 outfield players**. **No goalkeepers.**
-- **Our team** is controlled by **one shared neural network**. All five players run the same network, each on its own local view of the game.
-- The **opponent team** is **not learned**. It follows hand-written rules (see `opponent.md`).
+- Two teams of **5 outfield players**. No goalkeepers.
+- **Our team** is controlled by **one shared neural network** (parameter-shared MAPPO). All five players run the same network, each on its own local view.
+- The **opponent team** is not learned. It follows hand-written rules (see `opponent.md`).
 - Every player has **limited vision**: it sees opponents and the ball only within a radius around itself.
-- Teams play in **formations**, such as 2-2-1. The opponent may **change formation mid-match**, and one opponent player may be a **playmaker** who sees the whole pitch.
+- Teams play in **formations** (e.g. 2-2-1). The opponent may **change formation mid-match**, and one opponent player can be a **playmaker** who sees the whole pitch.
 
-**The project theme is structure versus information.** When players cannot see everything, how much can a formation (structure) make up for it, how well can the team infer what the opponent is doing (inference), and can it adapt to an opponent who has extra information?
+**Project theme: structure versus information.** When players cannot see everything, how much can a formation (structure) compensate, how well can the team infer what the opponent is doing, and can it adapt to an opponent with extra information?
 
-### 1.1 The three research questions, in game terms
+### 1.1 The Three Research Questions
 
 | # | Question | What happens in the game |
 |---|---|---|
-| **Q1** | Can formation structure compensate for limited vision? | We give our team three levels of formation structure and test them at different vision radii. We see if structure helps more when vision is small, and if the best formation changes with vision |
-| **Q2** | How fast can the team infer that the opponent changed formation, and how much does vision matter? | The opponent switches formation mid-match. Our team is not told. We compare four kinds of agent (memoryless, recurrent, belief-filter, oracle) |
-| **Q3** | Can the team adapt to an opponent playmaker? | One opponent player sees the entire pitch. Our team is not told who. We measure how much we lose, how much an adaptive team recovers, and whether it can identify him |
+| **Q1** | Can formation structure compensate for limited vision? | Three structure levels tested at several vision radii. Does structure help more when vision is small? Does the best formation change with vision? |
+| **Q2** | How fast can the team infer an opponent formation switch, and how much does vision matter? | Opponent switches mid-match unannounced. Compare memoryless, recurrent, belief-filter, and oracle agents |
+| **Q3** | Can the team adapt to an opponent playmaker? | One opponent sees the whole pitch. Our team is not told who. Measure cost, recovery, and identification |
 
-### 1.2 Known and unknown to our team
+### 1.2 Known and Unknown to Our Team
 
-| Known to our team | Unknown to our team |
+| Known | Unknown |
 |---|---|
-| Rules of the game | The opponent's current formation (inferred from positions) |
-| Our own formation and our own anchors | When the opponent switches formation |
-| Positions of our 4 teammates (always) | Whether the opponent has a playmaker, and who he is |
-| Score and possession state | How the opponent decides (its rules) |
-| Opponent players that are inside our vision radius | Opponent players outside our vision radius |
+| Rules of the game | Opponent's current formation (must be inferred) |
+| Our own formation and anchors | When the opponent switches formation |
+| All 4 teammates' positions (always) | Whether the opponent has a playmaker, and who |
+| Score and possession state | How the opponent decides |
+| Opponent players inside our vision radius | Opponent players outside our vision radius |
 
-The **oracle** variants of our agent are allowed to see the hidden information. They exist only as upper-bound comparisons.
+**Oracle variants** are given the hidden information and exist only as upper-bound comparisons.
 
 ---
 
 ## 2. Pitch, Coordinates and Time
 
-- **Pitch:** a bounded 2D rectangle of size `PITCH_L` by `PITCH_W`. The ball moves on the ground only (no aerial passes).
-- **Goals:** one at each end of the length axis, with mouth width `GOAL_W`, centered on the end line. **No goalkeeper.**
-- **Team frame (important for coding):** each team always attacks toward **+x in its own frame**. The environment stores world coordinates and converts. The opponent controller receives mirrored coordinates, so its code is identical to ours. This also removes the need for halftime side swaps.
-- **Time:** the match lasts `T` steps. One step is one tick of the game: all players choose an action, then the world updates once.
-- **Halftime marker:** step `T_HALF` is a marker used by the scheduled formation switch. There is no side swap. If we follow the benchmark paper (Song et al., 2023), `T = 3000` and halftime is at step 1501. This is optional, since our environment is a custom one.
-- **Outcome:** after `T` steps, more goals wins, equal goals is a draw. For scoring, a win counts 1, a draw 0.5, a loss 0.
+| Parameter | Value | Notes |
+|---|---|---|
+| `PITCH_L` | 100.0 m | Length axis (+x direction) |
+| `PITCH_W` | 60.0 m | Width axis (+y direction) |
+| `GOAL_W` | 12.0 m | Goal mouth, centered on each end line |
+| `T` | 1200 steps | Match length |
+| `T_HALF` | 600 steps | Halftime marker (for scheduled switches only; no side swap) |
+
+- **Pitch:** a bounded 2D rectangle. The ball moves on the ground only (no aerial passes).
+- **Goals:** one at each end of the length axis, width `GOAL_W`, centered. No goalkeeper.
+- **Team frame:** each team always attacks toward **+x in its own frame**. The environment stores world coordinates and calls `geometry.to_frame()` before giving a player its observation. The opponent controller receives mirrored coordinates, so its code is identical to ours. No halftime side swap is needed.
+- **One step:** all 10 players choose one action simultaneously, then the world updates once.
+- **Outcome:** after `T` steps, more goals wins. Win = 1, draw = 0.5, loss = 0.
 
 ---
 
-## 3. Entities and State
+## 3. True Game State
 
-The true game state at step `t` (what the environment stores):
+What the environment stores at step `t`:
 
 | Variable | Meaning |
 |---|---|
-| `x[i]` | Position of our player `i` (i = 1..5) |
-| `y[j]` | Position of opponent player `j` (j = 1..5) |
-| `ball` | Ball position |
-| `holder` | Who holds the ball: one of our players, one of the opponent's, or nobody (loose or in flight) |
-| `g` | Opponent's current formation (**hidden from our team**) |
-| `f` | Our formation (fixed during a match) |
-| `sigma` | Index of the opponent playmaker, 0 if none (**hidden**) |
-| `score` | Goals for each team |
+| `pos[team][i]` | World position of player `i` on `team` (both 0-indexed) |
+| `ball_pos` | Ball position (world frame) |
+| `holder` | `(team, i)` tuple, or `None` if loose or in flight |
+| `ball_state` | `"held"`, `"loose"`, or `"flight"` |
+| `flight` | Flight state dict while ball is in the air |
+| `formation[team]` | Formation name string (e.g. `"2-2-1"`) |
+| `anchors[team][i]` | World position of player `i`'s anchor |
+| `sigma_idx` | 0-based index of the playmaker, or `None` |
+| `score[team]` | Goals scored |
 | `t` | Current step |
-| `last_seen[...]`, `cooldowns` | Internal timers (tackle recovery, pass reception delay) |
+| `frozen[team][i]` | Steps remaining in tackle recovery (0 = free) |
 
-Players are identified by **number** (1 to 5). Opponent numbers are visible to our team, so our players can tell which opponent is which. This is what lets our team compare an opponent's position with the anchor of that slot in each possible formation.
+Players are 0-indexed in code (`i = 0..4`). Opponent numbers are consistent per player index, so our agents can compare an opponent's position against the anchor of each possible formation slot.
 
 ---
 
 ## 4. Formations
 
-A formation gives each of the 5 players a **slot** (defender D, midfielder M, or forward F) and a **home position** called an **anchor**.
+A formation gives each of the 5 players a **slot type** (D, M, or F) and a **home position** (anchor). Slot order (index 0 to 4) is always D-first, then M, then F.
 
-Slot order (player 1 to 5) for each formation. Always keep this order, so player numbers are consistent:
+| Formation | Slot types (indices 0–4) | Anchor fractions (team frame, [x, y]) |
+|---|---|---|
+| `2-2-1` | D, D, M, M, F | [0.25,0.30], [0.25,0.70], [0.50,0.30], [0.50,0.70], [0.75,0.50] |
+| `2-1-2` | D, D, M, F, F | [0.25,0.30], [0.25,0.70], [0.50,0.50], [0.75,0.30], [0.75,0.70] |
+| `1-3-1` | D, M, M, M, F | [0.25,0.50], [0.50,0.20], [0.50,0.50], [0.50,0.80], [0.75,0.50] |
+| `1-2-2` | D, M, M, F, F | [0.25,0.50], [0.50,0.30], [0.50,0.70], [0.75,0.30], [0.75,0.70] |
+| `3-1-1` | D, D, D, M, F | [0.25,0.20], [0.25,0.50], [0.25,0.80], [0.50,0.50], [0.75,0.50] |
 
-| Formation | Slot types for players 1 to 5 |
-|---|---|
-| 2-2-1 | D, D, M, M, F |
-| 2-1-2 | D, D, M, F, F |
-| 1-3-1 | D, M, M, M, F |
-| 1-2-2 | D, M, M, F, F |
-| 3-1-1 | D, D, D, M, F |
+Anchor fractions are multiplied by `[PITCH_L, PITCH_W]` to get world units. The first forward slot (the forward with the lowest index) takes the kickoff.
 
-- **Anchor coordinates** are stored in the config as fractions of the pitch (x along the length from own goal to opponent goal, y across the width). **They are TBD**: decide them in Phase 0, then freeze them.
-- The final set of formations may change. Start with three (for example 2-2-1, 1-3-1, 3-1-1) and add more if time allows.
-- **Formations are not enforced.** A player may leave its anchor. How much it matters depends on the structure level (Section 5).
-- **Formation switch (opponent only):** the anchors change at once and the players **walk** to the new anchors at normal speed. Nobody teleports. During the walk, players are far from their new anchors, so they are less effective. That is the natural cost of switching, and the visible sign of a switch.
-- After a goal, all players return to their current anchors for a kickoff.
+- **Formations are not enforced.** A player may leave its anchor. How much this costs depends on structure level (Section 5).
+- **Kickoff slot:** the first `"F"` slot index in the formation's slot list.
+- **Formation switch (opponent only):** anchors update instantly but players **walk** to new anchors at normal speed. Nobody teleports.
+- **After a goal:** all players return to anchors in the current formation for kickoff.
 
 ---
 
-## 5. Structure Levels and the Control Rating (the Q1 knob)
+## 5. Structure Levels and the Control Rating (Q1 knob)
 
-For **our team** we control how much formation structure the agent gets. This is the structure level `zeta`:
+For **our team** only:
 
-| `zeta` | Name | What changes |
+| `zeta` | Name | Effect |
 |---|---|---|
-| 0 | No structure | Formation only sets the kickoff positions. The agent does **not** observe its anchor and has **no** `HOLD_SHAPE` action |
-| 1 | Structure as information | The agent observes its own anchor and has `HOLD_SHAPE`. Leaving the anchor is free |
-| 2 | Structure as constraint | As level 1, plus effectiveness depends on distance from the anchor (control rating below) |
+| 0 | No structure | Formation only sets kickoff positions. No anchor in observation, no `HOLD_SHAPE` action |
+| 1 | Structure as information | Agent sees its anchor and can use `HOLD_SHAPE`. Leaving the anchor is free |
+| 2 | Structure as constraint | As level 1, plus effectiveness depends on distance from anchor |
 
-**Control rating** (level 2 only; it is 1 for levels 0 and 1):
+**Control rating** (level 2 only; = 1.0 for levels 0 and 1):
 
 ```
-c(x, anchor) = C_MIN + (1 - C_MIN) * exp( - ||x - anchor||^2 / L_CTRL^2 )
+c(x, anchor) = C_MIN + (1 - C_MIN) * exp( -||x - anchor||^2 / L_CTRL^2 )
 ```
 
-`C_MIN` is the minimum rating and `L_CTRL` a distance scale. The control rating multiplies:
+| Parameter | Value |
+|---|---|
+| `C_MIN` | 0.5 |
+| `L_CTRL` | 20.0 m |
 
-- **tackle success** (Section 8.4),
-- **pass accuracy** (Section 8.2),
-- **shot success** (Section 8.5).
-
-So a player far from its anchor plays worse. That creates the tension between "chase the ball" and "hold your shape". **The opponent always uses level 2.**
+The control rating multiplies tackle probability, pass accuracy (noise scale), and shot success. **The opponent always uses level 2.**
 
 ---
 
 ## 6. Vision
 
-Vision is the central information limit of the whole project.
+| Parameter | Value |
+|---|---|
+| `R_VISION` | 25.0 m (normal players) |
+| Playmaker | `infinity` (sees the whole pitch) |
 
-- **Visibility indicator:** a point `z` is visible to a player at position `x` with radius `rho` if `||z - x|| <= rho`.
-- **Normal players** (all of ours, and the opponent's non-playmakers) use `rho = R_VISION`.
-- **The opponent playmaker** (player `sigma`, Q3 only) uses `rho = infinity`.
-- What a player sees: **opponents and the ball**, only inside its radius.
-- What a player always knows: its **teammates' positions**, whether it holds the ball, the **possession state** (ours / opponent's / loose), the **score**, and the time. (This is a modelling simplification and is stated in the report.)
-- **Interception needs sight:** a defender can only try to intercept a pass if the ball was inside its vision radius when the pass was played (Section 8.2).
-- Hidden entries are set to **zero** in the observation vector and a **visibility flag** is set to 0, so the network can tell "not seen" from "seen at the origin".
-
----
-
-## 6.1 Why This Setup Works (design reasoning)
-
-Read this once so the design does not look arbitrary.
-
-- **The opponent holds its formation** (zonal, not man-marking). Man-marking would pull opponent players away from their anchors to chase our players, hiding the formation, and Q2 would become unanswerable. Holding formation keeps the opponent's shape readable from where its players stand.
-- **Vision still matters** without man-marking. Our players that cannot see defenders cannot find free teammates or safe passing lanes, and the opponent also cannot press or intercept what is outside its own radius.
-- **The playmaker** has a real effect because interception needs sight and his attacking decisions use the whole pitch.
+- A point is visible to a player if its distance is `<= R_VISION`.
+- A player **always** knows: all 4 teammates' positions, possession state, score, and time.
+- A player sees opponents and the ball **only** within its radius.
+- Hidden entries in the observation are **zero** and the visibility flag is 0 — so the network can distinguish "not seen" from "seen at origin".
+- **Interception requires sight:** a defender can only intercept a pass if the ball was inside its vision radius when the pass was played.
 
 ---
 
 ## 7. Actions
 
-Every player chooses **one discrete action per step**. The action set is the same for every player. Invalid actions are **masked** (the network cannot choose them), using an action-mask vector given with each observation.
+Total action count with `D=8` directions: **23 actions**.
 
-| Index group | Action | Meaning | Mask (invalid when) |
-|---|---|---|---|
-| 0 to `D-1` | `MOVE_d` | Move up to `V_PLAYER` in direction `d` (there are `D` evenly spaced directions, `D` is TBD). With the ball, the ball moves with the player | never |
-| next | `STAY` | Do not move | never |
-| next | `HOLD_SHAPE` | Move toward your own anchor | `zeta = 0` |
-| next | `GO_TO_BALL` | Move toward the ball | ball not visible |
-| next 4 | `PASS_k` | Pass to teammate `k` (4 teammates, fixed order by player number) | you do not hold the ball |
-| next | `DRIBBLE_GOAL` | Move toward the opponent's goal with the ball (a macro for the best direction) | you do not hold the ball |
-| next | `SHOOT` | Shoot at goal | not holding the ball, or outside the shooting zone |
-| next | `TACKLE` | Try to win the ball from the opponent carrier | no opponent carrier within `D_TACKLE` |
-| next 5 | `SHADOW_j` | Move toward the point at distance `D_SHADOW` from opponent `j`, on the line from `j` to **our own goal** (stay between him and our goal) | opponent `j` not visible |
+| Index range | Action | Mask condition |
+|---|---|---|
+| 0 – 7 | `MOVE_DIR_d` (8 evenly spaced directions) | always valid |
+| 8 | `STAY` | always valid |
+| 9 | `HOLD_SHAPE` | masked when `zeta = 0` |
+| 10 | `GO_TO_BALL` | masked when ball not visible |
+| 11 – 14 | `PASS_k` (4 teammates, ascending by player index) | masked when not holding ball |
+| 15 | `DRIBBLE_GOAL` | masked when not holding ball |
+| 16 | `SHOOT` | masked when not holding ball or outside shoot zone |
+| 17 | `TACKLE` | masked when no opponent carrier within `D_TACKLE` |
+| 18 – 22 | `SHADOW_j` (5 opponent indices, 0-based) | masked when opponent `j` not visible |
 
 Notes:
-
-- **`SHADOW_j` is used only by our learned team.** It is our concrete way of "adapting" to a playmaker: work out who he is and shadow him. The opponent heuristic does not use it.
-- Keep the action indexing in **one place** in the code (an enum), because the mask and the policy both depend on it.
-- `HOLD_SHAPE`, `GO_TO_BALL`, `DRIBBLE_GOAL` and `SHADOW_j` are all **macros** built on one low-level routine, `MOVE_TO(point)`, which moves the player toward a point by at most `V_PLAYER` per step. The opponent controller uses the same `MOVE_TO` routine (see `opponent.md`), so both teams obey the same movement rules.
-- Total number of actions = `D + 1 + 1 + 1 + 4 + 1 + 1 + 1 + 5`.
+- **`SHADOW_j`** is for our learned team only. The opponent does not use it.
+- `HOLD_SHAPE`, `GO_TO_BALL`, `DRIBBLE_GOAL`, `SHADOW_j` are macros built on `MOVE_TO(point)`.
+- `PASS_k` where `k=0..3` maps to the 4 teammates in ascending player index order (self excluded).
+- Invalid actions are masked: the policy cannot select them, but if the raw integer arrives, the env replaces it with `STAY`.
+- `MOVE_TO` (macro used by scripted controllers) is **not** in the learner's indexed action set.
 
 ---
 
 ## 8. Mechanics in Detail
 
-### 8.1 Possession and loose balls
+### 8.1 Possession and Loose Balls
 
-- A player who **holds** the ball carries it: the ball position equals the player's position.
-- If nobody holds the ball (after a failed pass, a missed shot, a failed tackle that knocks it loose), the ball is **loose**. The ball decelerates and stops. The player who can reach its resting point first (by time to reach) takes possession, with ties broken by a seeded random draw. A player takes the ball if it is within `D_PICKUP`.
-- A ball **in flight** (pass or shot) is not held by anyone until it arrives.
+| Parameter | Value |
+|---|---|
+| `D_PICKUP` | 1.5 m |
+
+- A holder carries the ball: ball position = player position.
+- **Loose ball:** the player who can reach the ball resting point first takes possession. Ties broken by seeded random draw. A player picks up if within `D_PICKUP`.
 
 ### 8.2 Passing
 
-1. The passer chooses `PASS_k`. The target point is the **position of teammate `k` at the moment of release**.
-2. A small random **angular error** is added. Its size grows as the passer's control rating drops: `error ~ Normal(0, S_PASS^2 * (1 - c_passer))`.
-3. **Interception check.** For each opposing player `d` that was **allowed to react** (the ball was inside `d`'s vision radius at release):
-   - `q` = the closest point on the pass segment to `d`,
-   - `t_ball(q)` = `||q - passer|| / V_PASS`,
-   - `t_def(q)` = `||q - d|| / V_PLAYER`,
-   - `d` intercepts if `t_def(q) <= t_ball(q) + INTERCEPT_MARGIN`.
-   If several defenders qualify, the one with the **smallest `t_def - t_ball`** wins.
-4. **Outcome.** If intercepted, the ball goes to the interceptor. Otherwise it travels to the target. If the receiver is within `D_PICKUP` of the target when the ball arrives, he takes possession, otherwise the ball is loose there.
-5. **Timing.** The ball is "in flight" for `ceil(t_arrive)` steps, moving along the segment. The result is decided at release (it is deterministic given the random error), so no moving-target physics is needed.
+| Parameter | Value |
+|---|---|
+| `V_PASS` | 3.0 m/step |
+| `S_PASS` | 0.15 (angular error scale) |
+| `INTERCEPT_MARGIN` | 0.5 steps |
+
+1. Passer chooses `PASS_k`. Target = position of teammate `k` at release.
+2. Angular error added: `error ~ Normal(0, S_PASS² * (1 - c_passer))`. Larger error when control rating is lower.
+3. **Interception check** for each defender `d` that **was inside its radius when the pass was played**:
+   - `q` = closest point on pass segment to `d`
+   - `t_ball = ||q - passer|| / V_PASS`
+   - `t_def = ||q - d|| / V_PLAYER`
+   - Intercepts if `t_def <= t_ball + INTERCEPT_MARGIN`
+4. Ball flies for `ceil(||passer - end|| / V_PASS)` steps. Result is decided at release.
+5. If receiver is within `D_PICKUP` when ball arrives, they take possession; otherwise ball is loose.
 
 ### 8.3 Dribbling
 
-The carrier moves at `V_DRIBBLE` (`<= V_PLAYER`) while holding the ball.
+| Parameter | Value |
+|---|---|
+| `V_DRIBBLE` | 0.9 m/step |
+| `V_PLAYER` | 1.0 m/step |
+
+Carrier moves at `V_DRIBBLE` (slower than free movement `V_PLAYER`) while holding the ball.
 
 ### 8.4 Tackling
 
+| Parameter | Value |
+|---|---|
+| `D_TACKLE` | 2.0 m |
+| `T_TACKLE_RECOVER` | 3 steps |
+
 - A defender within `D_TACKLE` of the carrier may choose `TACKLE`.
-- Success probability: `p_win = c_defender / (c_defender + c_carrier)`. With equal ratings it is 0.5.
-- **Success:** possession goes to the defender. **Failure:** the carrier keeps the ball and the defender is frozen for `T_TACKLE_RECOVER` steps.
-- If several defenders tackle in the same step, resolve them in a **seeded random order** until one succeeds.
+- Success probability: `p_win = c_defender / (c_defender + c_carrier)`.
+- Success: defender takes possession. Failure: defender is frozen for `T_TACKLE_RECOVER` steps.
+- Multiple tackle attempts in one step are resolved in seeded random order until one succeeds.
 
 ### 8.5 Shooting
 
-- A shot is only allowed inside the **shooting zone** (distance to the opponent's goal at most `D_SHOOT_MAX`).
-- Scoring probability: `p = P_MAX * exp(-d / D0) * openness * c_shooter`, where `d` is the distance to the goal center and `openness` is the measure of how clear the shot line is of nearby defenders (decreasing with their proximity to the line).
-- With no goalkeeper, the only contest is the defenders' proximity to the shot line.
-- **Goal:** the match score is updated and play restarts from kickoff (Section 4). **Miss:** the ball becomes loose near the goal line, at a point with random spread.
+| Parameter | Value |
+|---|---|
+| `D_SHOOT_MAX` | 35.0 m |
+| `P_MAX` | 0.8 |
+| `D0` | 30.0 m (decay constant) |
+| `SHOT_BLOCK_SCALE` | 4.0 m |
+| `SHOT_MISS_SPREAD` | 6.0 m |
 
-### 8.6 Out of bounds
+Scoring probability:
+```
+p = P_MAX * exp(-d / D0) * openness(shooter, goal, defenders) * c_shooter
+```
+where `openness` = product over defenders of `1 - exp(-(dist_to_shot_line / SHOT_BLOCK_SCALE)²)`.
 
-The ball is clamped to the pitch (it stops or is returned in play). Only a ball inside the goal mouth that crosses the end line counts as a goal. This is a simplification: no throw-ins or corners.
+- The shooter must be within `D_SHOOT_MAX` of the goal center (in team frame).
+- **Goal:** score updated, kickoff. **Miss:** ball becomes loose near goal line with random y-offset ~ `Normal(0, SHOT_MISS_SPREAD²)`, clipped to pitch.
+
+### 8.6 Out of Bounds
+
+Ball is clamped to the pitch. No throw-ins or corners. Only a ball that crosses the end line inside the goal mouth (width `GOAL_W`, centered) counts as a goal.
 
 ### 8.7 Kickoff
 
-After a goal, everyone returns to their anchors in their current formation. The team that conceded gets the ball (given to the player of a fixed kickoff slot, such as the first forward).
+After a goal, all players return to their formation anchors. The team that **conceded** starts with the ball (given to the first forward by slot index). Team that scored, kicks off too — wait, actually: the team that **conceded** gets the ball (standard football rule). The ball is placed at the kickoff player's position.
 
-### 8.8 One step of the game loop (the exact order to implement)
+### 8.8 One Step of the Game Loop (exact order)
 
-1. Compute each player's **observation** (with visibility) and action mask. Opponent players use the **same function**, with their own radius.
-2. Collect all 10 actions: ours from the policy, the opponent's from its rules.
-3. Resolve **tackles**.
-4. Resolve **passes and shots** (create the flight or the shot result).
-5. Move **players** (movement, walking to anchors, shadowing). The ball moves with its carrier, or along its flight path.
-6. Resolve **loose-ball pickups**.
-7. Check for **goals**. If a goal happened, run the kickoff.
-8. Update **formation switches** for the opponent (Section 4 in `opponent.md`).
-9. Compute **rewards** and **logs**.
-10. Advance `t`. The episode ends at `T`.
+```
+1. Build observations for all 10 players (with visibility, masks)
+2. Collect actions: our policy (or scripted) for team 0, scripted opponent for team 1
+3. Resolve tackles (seeded random order if multiple)
+4. Resolve the ball holder's pass or shot (create flight or apply shot result)
+5. Move all non-acting, non-frozen players toward their targets
+6. Advance ball in flight (if any); resolve loose-ball pickups
+7. Check for goals; if scored, update score and run kickoff
+8. Update opponent formation (FormationManager.update)
+9. Compute rewards, log events, advance t
+10. Episode ends when t >= T
+```
 
 ---
 
-## 9. Rewards (what the learning agent is trained on)
-
-All five of our players receive the **same team reward** each step:
+## 9. Rewards
 
 ```
 R_t = R_team + lambda_t * phi(state, actions) + [t == T] * ETA * sign(goal_difference)
 ```
 
-- **`R_team`**: +1 when we score, -1 when we concede.
-- **`phi` (shaping, individual-level)**: small rewards for completed passes (weighted by how much they advance the ball), successful tackles, shots on target, and small penalties for turnovers.
-- **`lambda_t`**: the shaping weight, **annealed toward 0** during training.
-- **`ETA`**: the end-of-match outcome bonus. It is larger than any single shaping event so that winning stays the top priority.
-- **Cap:** total shaping reward per episode is capped at `C_SHAPE`.
-
-**Reward-hacking watch.** PPO maximizes total reward. If shaping is earned many times per match (for example endless safe sideways passes), it can outweigh the match outcome and the team can look good on shaping while not winning. So during training **always log shaping return and win rate together**. If shaping rises while win rate is flat, reduce `lambda`, or reweight (for example scale the pass reward by distance or the number of defenders beaten), then retrain.
-
----
-
-## 10. What the Agent Sees (Observation Vectors)
-
-Each player gets its **own** observation vector and action mask. The same network is applied to each one. Positions are given **relative to the player** and normalized by the pitch size.
-
-| Block | Contents | Size note |
+| Component | Value | Meaning |
 |---|---|---|
-| Self | position, previous action (one-hot), has-ball flag, **slot one-hot** (5), slot-type one-hot (D, M, F) | fixed |
-| Anchor | own anchor (x, y) and current control rating. **Zeros if `zeta = 0`** | fixed |
-| Own formation | one-hot of `f` | `|F|` |
-| Teammates (4, fixed order by player number) | relative position (dx, dy), has-ball flag | always visible |
-| Opponents (5, fixed order by opponent number) | relative position (dx, dy), **visibility flag**. Zeros if not visible | 5 x 3 |
-| Ball | relative position, **visibility flag**. Zeros if not visible | fixed |
-| Match info | possession state (ours / opponent / loose), score difference (clipped), time fraction `t/T` | fixed |
+| `R_team` | +1 / -1 | Goal scored / conceded |
+| `ETA` | 1.0 | End-of-match outcome bonus |
+| `w_pass` | +0.02 | Completed pass (scaled by forward advancement) |
+| `w_tackle` | +0.02 | Successful tackle by our team |
+| `w_shot` | +0.02 | Shot by our team |
+| `w_turnover` | -0.02 | Turnover (pass intercepted by opponent) |
+| `shape_cap` | 5.0 | Maximum total `|shaping|` per episode |
+| `shaping_weight` | 1.0 → 0 | Annealed during training |
 
-Extra inputs for the **comparison variants** (never in the plain agent):
+All five players receive the **same team reward**.
 
-- **Belief-augmented:** the belief vector `b_i` over the opponent formation (Section 12.3).
-- **Oracle (Q2):** the true opponent formation `g` as a one-hot.
-- **Oracle (Q3):** the playmaker index `sigma` as a one-hot.
-
-**Critic input (training only, never given at execution):** the full state: all 10 positions, ball, holder, `g` as a one-hot, `sigma` as a one-hot, score, and time. This is called centralized training with decentralized execution.
+**Reward-hacking watch:** always log shaping return and win rate together. If shaping rises while win rate is flat, reduce `lambda` or reweight the pass reward by forward distance or defenders beaten.
 
 ---
 
-## 11. Experiment Conditions (what we vary)
+## 10. Observation Vectors
 
-| Knob | Values | Used in |
+Each player gets its own observation vector and action mask. Positions are **relative to the player** (team frame).
+
+**Flat observation vector** (total **79 features** with D=8, 5 formations):
+
+| Block | Content | Size |
 |---|---|---|
-| Our formation `f` | start with three formations | all |
-| Structure level `zeta` | 0, 1, 2 | Q1 (Q2 and Q3 use 2) |
-| Vision radius `R_VISION` | three levels, plus full vision as a reference | all |
-| Opponent initial formation `g0` | from the formation set | all |
-| Opponent switching mode `G` | none, scheduled, random, score-reactive | Q2 (others use none) |
-| Playmaker index `sigma` | 0 (none), or a player at a defender, midfielder or forward slot | Q3 |
-| Agent variant | random, heuristic, memoryless, recurrent (GRU), belief-augmented, oracle | all |
-| Training seeds | 5 (provisional) | all |
-| Evaluation matches per condition and seed | 100 (provisional) | all |
+| Self position | (x, y) normalized by pitch | 2 |
+| Previous action | one-hot (23 actions + "none" slot) | 24 |
+| State flags | has_ball, frozen | 2 |
+| Slot one-hot | which of 5 player slots am I | 5 |
+| Slot type | D / M / F | 3 |
+| Anchor offset + control | (dx, dy) to anchor / pitch, control rating. **zeros if `zeta=0`** | 3 |
+| Own formation | one-hot over 5 formations | 5 |
+| Teammates (4) | (dx, dy) relative + has_ball each | 12 |
+| Opponents (5) | (dx, dy) relative + visibility flag (zeros if not visible) | 15 |
+| Ball | (dx, dy) relative + visibility flag | 3 |
+| Match info | possession one-hot (OWN/OTHER/LOOSE), score diff clipped/3, t/T | 5 |
+| **Total** | | **79** |
 
-Every run must be reproducible from a **config file plus a seed**. Log the config with the results.
+**Global state** (for centralized critic, 51 features):
+All 10 positions (normalized), ball position, holder one-hot (11 options including None), 2× formation one-hot (5), sigma one-hot (6), score diff, t/T.
+
+**Extra inputs for comparison variants** (appended to the observation):
+- Belief-augmented: belief vector `b` over 5 formations (5 floats)
+- Oracle Q2: true opponent formation as one-hot (5 floats)
+- Oracle Q3: playmaker index as one-hot (6 floats, 0 = none)
 
 ---
 
-## 12. The Learning Agent (for the coders)
+## 11. Experiment Conditions
+
+| Knob | Values |
+|---|---|
+| Our formation `f` | all 5 formations |
+| Structure level `zeta` | 0, 1, 2 (Q1); fixed at 2 for Q2/Q3 |
+| Vision radius `R_VISION` | small (≈12), medium (≈25, default), large (≈40), full | 
+| Opponent initial formation `g0` | from the 5 formations |
+| Opponent switching mode | NONE, SCHEDULED, RANDOM, SCORE_REACTIVE |
+| Playmaker index `sigma` | 0 (none), or a D/M/F slot index |
+| Agent variant | random, heuristic, memoryless, recurrent, belief-augmented, oracle |
+| Training seeds | 5 |
+| Evaluation matches per condition/seed | 100 |
+
+Every run must be reproducible from a **config file + seed**. Log the config with the results.
+
+---
+
+## 12. The Learning Agent
 
 ### 12.1 Algorithm
 
-- **Parameter-shared PPO** (MAPPO style). One actor network and one centralized critic. The actor is called once per player per step.
-- Use generalized advantage estimation (GAE), the clipped PPO objective and several epochs per batch. Hyperparameters are TBD and are tuned during the first runs.
-- Our opponent is fixed, so the environment is stationary during training. There is no self-play.
+**Parameter-shared MAPPO.** One actor network shared across all 5 players. One centralized critic that sees the full state. The actor is called once per player per step.
 
-### 12.2 Actor variants
+- Generalized Advantage Estimation (GAE)
+- Clipped PPO objective
+- Multiple epochs per batch
+- Separate seeded random streams for env, opponent, and policy
 
-| Variant | Description | Used for |
+See `training.md` for hyperparameters and the training protocol.
+
+### 12.2 Actor Variants
+
+| Variant | Architecture | Used for |
 |---|---|---|
-| Memoryless | MLP on the current observation | Lower baseline in Q2 |
-| Recurrent | MLP then **GRU**, then action head. The hidden state carries what the player saw earlier | Main learner in Q2 and Q3 |
-| Belief-augmented | Memoryless MLP with the Bayesian belief appended to its input | Strong non-learned-inference baseline in Q2 |
-| Oracle | Memoryless MLP with the true `g` (Q2) or `sigma` (Q3) appended | Upper bound |
+| Memoryless | MLP on current observation | Lower baseline, Q1 |
+| Recurrent | MLP → GRU → action head | Main learner Q2, Q3 |
+| Belief-augmented | Memoryless MLP with belief appended | Strong non-learning baseline, Q2 |
+| Oracle Q2 | Memoryless MLP + true formation one-hot | Upper bound Q2 |
+| Oracle Q3 | Memoryless MLP + playmaker one-hot | Upper bound Q3 |
 
-**Training with the GRU:** train on sequences (chunks of consecutive steps), reset the hidden state at episode start, and keep hidden states per player.
+**Training the GRU:** train on sequences (chunks of consecutive steps). Reset hidden state at episode start. Maintain per-player hidden states throughout a sequence.
 
-### 12.3 The Bayesian belief filter (a non-learning baseline for Q2)
+### 12.3 The Bayesian Belief Filter (non-learning baseline for Q2)
 
-Each player keeps a probability `b_i(g)` over the possible opponent formations. Each step:
+Each player maintains a probability distribution `b_i(g)` over the 5 opponent formations:
 
 ```
-predict:  b~(g)  = (1 - H) * b_prev(g) + H / |F|             # H = assumed switch probability per step
-update:   b(g)  ∝ b~(g) * product over visible opponents j of  Normal( y_j ; anchor_g(j), S_NOISE^2 * I )
+predict:  b~(g)  = (1 - H) * b_prev(g) + H / |F|
+update:   b(g)  ∝ b~(g) * ∏_{j visible} Normal( y_j ; anchor_g(j), S_NOISE² * I )
 ```
 
-Only opponents the player currently **sees** contribute to the update. Normalize `b` after the update. `S_NOISE` absorbs how far the opponent's pressing and drifting pull players from their anchors. The inferred formation is the argmax of `b`.
+- `H` = assumed formation switch probability per step (TBD, tune in Phase 0)
+- `S_NOISE` = noise absorbing how far opponents drift from anchors (TBD)
+- Only visible opponent players contribute to the update
+- Inferred formation = argmax of `b`
 
-### 12.4 The probes (for measuring what the network learned)
+See `agents.md` for the implementation reference.
+
+### 12.4 Probes (measuring what the network learned)
 
 A **probe** is a small classifier trained on the recurrent policy's hidden state `z`, **without changing the policy**:
+- **Formation probe:** predicts `g` from `z` (Q2)
+- **Playmaker probe:** predicts `sigma` from `z` (Q3)
 
-- **Formation probe:** predicts the opponent formation `g` from `z` (Q2).
-- **Playmaker probe:** predicts the playmaker index `sigma` from `z` (Q3).
+Train probes after the policy is trained, using ground truth from `info["g"]` and `info["sigma"]`.
 
-Train probes after the policy is trained, using the hidden truth from the environment's `info`.
+### 12.5 Training Curriculum
 
-### 12.5 Training stages (curriculum)
-
-1. **Sanity runs:** a random policy must lose clearly. Check the reward wiring.
-2. **Easy setting:** one formation, the largest vision radius, no switching, no playmaker. The learned team should clearly beat random and approach the heuristic.
-3. **Widen:** all formations, then smaller radii, then structure levels (Q1).
-4. **Switching opponents** (Q2) and the **playmaker** (Q3).
-Mark each widening point on the learning curves.
-
-### 12.6 Code interface (suggested)
-
-```python
-env = FootballEnv(config)                  # config holds every parameter (Section 17)
-obs, info = env.reset(seed=seed)           # obs: dict {player_id: vector}, plus masks
-obs, reward, done, info = env.step(actions)  # actions: dict {player_id: int}
-# reward: one shared scalar for the team (plus a dict of shaping parts for logging)
-# info: hidden truth and events:
-#   info["g"], info["sigma"], info["score"], info["switch_events"], info["events"]
-```
-
-- `info["events"]` is a list of logged events: passes (completed or intercepted), tackles, shots, goals, formation switches, shadow actions. **All metrics are computed from this log**, not from ad hoc counters.
-- The **opponent controller lives inside the environment** and uses the same observation function as our players, so it cannot see more than its radius allows (except the playmaker).
+1. **Sanity:** random policy must lose clearly. Check reward wiring.
+2. **Easy:** one formation, full vision, no switching, no playmaker.
+3. **Widen:** all formations → smaller radii → structure levels (Q1).
+4. **Switching opponents** (Q2) and **playmaker** (Q3).
 
 ---
 
 ## 13. What We Measure
 
-| Metric | Definition | Question |
-|---|---|---|
-| Win score `W` | wins plus half of draws, over matches | all |
-| Goal difference | goals for minus goals against | all |
-| Structure benefit `B_zeta(f,r)` | `W` at structure level `zeta` minus `W` at level 0, same formation and radius | Q1 |
-| Best formation `f*(r)` | the formation with the highest `W` at radius `r` | Q1 |
-| Regret vs oracle | `W(oracle) - W(agent)` | Q2, Q3 |
-| Detection delay | steps after a switch until the inferred formation equals the true one (belief filter or probe) | Q2 |
-| Adaptation lag | steps after a switch until the rolling goal difference recovers to its pre-switch level | Q2 |
-| Playmaker cost `E(sigma)` | `W` without playmaker minus `W` with playmaker, for the unaware team | Q3 |
-| Recovery ratio | fraction of that cost the adaptive team wins back | Q3 |
-| Identification accuracy and delay | probe accuracy for `sigma`, and steps until it is stably right | Q3 |
-| Shadow rate | share of steps in which some player of ours shadows opponent `sigma` | Q3 |
-| Behaviour stats | possession share, passes and completion, shots, team spread | Q1 to Q3 |
+See `experiments.md` for the full evaluation protocol. Key metrics:
 
-Report mean and standard deviation over training seeds. Use the same evaluation seeds for every policy so comparisons are **paired**.
-
----
-
-## 14. Phase 0 Checks (before any serious training)
-
-1. **Random loses:** a random policy loses clearly to the heuristic opponent.
-2. **Balance:** heuristic vs heuristic is roughly balanced.
-3. **Vision matters:** the same heuristic team with a small radius loses to itself with a large radius.
-4. **Formation is readable:** opponent players stay close to their anchors (measure the average distance), otherwise Q2 is not well posed.
-5. **Playmaker works:** a heuristic team with a full-vision playmaker beats the same team without one.
-6. **Formation win matrix:** run formation vs formation matches with the heuristic and store the matrix. It is a benchmark for Q1 and gives the best-response formation.
-7. **Determinism:** the same seed and config give the same match.
-
-If checks 3 to 5 fail, tune the opponent or constants before training. Otherwise the experiments will show nothing.
-
----
-
-## 15. Priorities (if time runs short)
-
-1. **Phase 0 and Q1** are the core.
-2. **Q2** comes next.
-3. **Q3** comes last. Cut the number of tested playmaker positions first, then the number of formations.
-
----
-
-## 16. Common Mistakes to Avoid
-
-- Giving the opponent controller more information than a player with the same radius would have (it will invalidate Q2 and Q3).
-- Forgetting to mask actions, which makes the agent pick impossible moves.
-- Letting the environment mutate state in a different order from Section 8.8, which changes results.
-- Using one random number stream for everything. Use separate seeded streams for the environment, the opponent and the policy so runs are reproducible.
-- Looking at win rate only. Always log shaping return too.
-- Reporting only a single seed.
-
----
-
-## 17. Parameter List (all TBD, fill in during Phase 0)
-
-| Parameter | Meaning |
+| Metric | Question |
 |---|---|
-| `PITCH_L`, `PITCH_W`, `GOAL_W` | Pitch and goal size |
-| `T`, `T_HALF` | Match length and halftime marker |
-| `V_PLAYER`, `V_DRIBBLE`, `V_PASS` | Speeds |
-| `R_VISION` | Vision radius (several levels) |
-| `D` | Number of movement directions |
-| `D_TACKLE`, `T_TACKLE_RECOVER` | Tackle distance and recovery time |
-| `D_PICKUP`, `INTERCEPT_MARGIN` | Ball pickup distance and interception margin |
-| `D_SHADOW` | Shadowing distance |
-| `D_SHOOT_MAX`, `P_MAX`, `D0` | Shooting zone and probability constants |
-| `S_PASS` | Pass error scale |
-| `C_MIN`, `L_CTRL` | Control rating constants |
-| `ETA`, `LAMBDA` schedule, `C_SHAPE` | Reward constants |
-| `H`, `S_NOISE` | Belief filter constants |
-| Anchor coordinates per formation | Fractions of the pitch |
-| Opponent constants | See `opponent.md` |
-| PPO hyperparameters, sequence length, number of parallel environments | Learning |
+| Win score `W` (wins + 0.5×draws) / matches | All |
+| Goal difference | All |
+| Structure benefit `B_zeta` = W(zeta) - W(zeta=0) at same f, radius | Q1 |
+| Best formation `f*(radius)` | Q1 |
+| Regret vs oracle | Q2, Q3 |
+| Detection delay | Q2 |
+| Adaptation lag | Q2 |
+| Playmaker cost | Q3 |
+| Recovery ratio | Q3 |
+| Shadow rate | Q3 |
+| Behaviour stats (possession, pass completion, shots, spread) | All |
 
-A config skeleton:
+Report mean ± std over 5 training seeds with **paired evaluation** seeds.
+
+---
+
+## 14. Phase 0 Checks
+
+Run these before any training. All must pass.
+
+| Check | Pass condition |
+|---|---|
+| A. Formation readability | Mean opponent anchor distance << mean inter-formation anchor distance |
+| B. Vision matters | Heuristic team with R=25 beats same team with R=12 |
+| C. Playmaker works | Heuristic team with sigma beats same team without |
+| D. Balance and determinism | Heuristic vs heuristic ≈ 50%, same seed = same match |
+| E. Formation win matrix | Run all 5×5 formation pairs with heuristic, store matrix |
+| F. Random policy loses | Random policy clearly loses to scripted opponent |
+
+If checks B–C fail, tune constants before any training. See `opponent.md` Section 13 for calibration order.
+
+---
+
+## 15. Common Mistakes to Avoid
+
+- Giving the opponent controller more information than its vision radius allows.
+- Forgetting to mask actions (agent picks impossible moves).
+- Implementing the game loop in a different order from Section 8.8.
+- Using one random number stream for everything (breaks reproducibility).
+- Logging only win rate (always log shaping return too).
+- Reporting only a single seed.
+- Confusing 0-based player indices in code with the 1-based "player numbers" described informally.
+
+---
+
+## 16. Calibrated Parameter Reference
+
+All values from `configs/default.yaml` at project head:
 
 ```yaml
-pitch: {length: null, width: null, goal_width: null}      # TBD
-time: {T: null, T_half: null}                              # TBD
-speeds: {player: null, dribble: null, pass: null}          # TBD
-vision: {radii: null}                                      # TBD (several levels)
-mechanics: {tackle_dist: null, tackle_recover: null, pickup: null,
-            intercept_margin: null, shadow_dist: null,
-            shoot_max: null, p_max: null, d0: null, s_pass: null}
-control: {c_min: null, l_ctrl: null}
-reward: {eta: null, lambda_schedule: null, shape_cap: null}
-belief: {hazard: null, noise: null}
-formations: {anchors: null}                                # TBD per formation
-seeds: {train: null, eval: null}
+pitch:   {length: 100.0, width: 60.0, goal_width: 12.0}
+time:    {T: 1200, T_half: 600}
+speeds:  {player: 1.0, dribble: 0.9, pass: 3.0}
+vision:  {radius: 25.0}
+actions: {n_directions: 8}
+
+mechanics:
+  tackle_dist: 2.0
+  tackle_recover: 3
+  pickup: 1.5
+  intercept_margin: 0.5
+  shadow_dist: 4.0
+  shoot_max: 35.0
+  p_max: 0.8
+  d0: 30.0
+  shot_block_scale: 4.0
+  shot_miss_spread: 6.0
+  s_pass: 0.15
+
+control:   {c_min: 0.5, l_ctrl: 20.0}
+structure: {zeta: 2}
+
+reward:
+  eta: 1.0
+  w_pass: 0.02
+  w_tackle: 0.02
+  w_shot: 0.02
+  w_turnover: -0.02
+  shape_cap: 5.0
+  shaping_weight: 1.0
+
+formations:
+  ours: "2-2-1"
+  opponent: "2-2-1"
+
+opponent:
+  zone:   {r_zone: 12.0, omega: 0.4, eps_arrive: 1.0, transition_max: 60}
+  switching: {mode: NONE, dwell_min: 150}
+  attack:  {shoot_min: 0.3, w_fwd: 2.0, w_open: 0.5, w_dist: 0.3,
+            pass_min: 0.3, d_danger: 6.0, hub_bonus: 0.3, open_max: 15.0}
+  support: {adv: 8.0, mid: 6.0, def: 3.0, r_support: 10.0}
+  randomness: {eps_opp: 0.0}
+  playmaker: {sigma: 0}
 ```
+
+**Belief filter parameters** (still TBD; set before Q2 experiments):
+
+| Parameter | Meaning | Suggested starting point |
+|---|---|---|
+| `H` | Per-step switch probability | 0.001–0.01 |
+| `S_NOISE` | Opponent anchor noise | 3–8 m |
 
 ---
 
-## 18. Glossary
+## 17. Glossary
 
 | Term | Meaning |
 |---|---|
-| Anchor | The home position of a formation slot |
-| Slot | A position in a formation (D, M or F) with a player number |
+| Anchor | Home position of a formation slot (world coords) |
+| Slot | A position in a formation (D, M, or F) with a 0-based player index |
 | Structure level `zeta` | How much formation structure our agent gets (0, 1, 2) |
-| Control rating | A multiplier that drops as a player strays from its anchor |
+| Control rating | Effectiveness multiplier that drops as a player strays from anchor |
 | Vision radius | How far a player can see opponents and the ball |
-| Playmaker | An opponent player with full-pitch vision |
-| Oracle | An agent given the hidden information. An upper bound only |
-| Belief | A probability distribution over the opponent's formation |
-| Probe | A small classifier read off the network's hidden state |
+| Playmaker | Opponent player with full-pitch vision |
+| Oracle | Agent given hidden information; upper bound only |
+| Belief | Probability distribution over opponent formations |
+| Probe | Small classifier read off the network's hidden state |
 | Shadow | Stay between an opponent and our own goal |
 | CTDE | Centralized training, decentralized execution |
 | Paired evaluation | Different policies tested on the same random seeds |
+| Team frame | Coordinate frame where the team attacks toward +x |

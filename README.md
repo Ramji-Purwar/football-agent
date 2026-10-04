@@ -3,6 +3,18 @@
 Code for the project described in `game.md` and `opponent.md`.
 Run everything from the project root (the folder containing this README), using `python -m ...`.
 
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [`docs/game.md`](docs/game.md) | Full game specification, calibrated parameters, observation format |
+| [`docs/opponent.md`](docs/opponent.md) | Scripted opponent — decision logic, formation switching, playmaker |
+| [`docs/codebase.md`](docs/codebase.md) | Complete module map, import paths, data flow, config system |
+| [`docs/rendering.md`](docs/rendering.md) | Current renderer + full 2D/3D renderer design guide |
+| [`docs/agents.md`](docs/agents.md) | All agent variants (random → oracle), belief filter implementation |
+| [`docs/training.md`](docs/training.md) | MAPPO algorithm, GRU sequence handling, curriculum, logging |
+| [`docs/experiments.md`](docs/experiments.md) | Q1/Q2/Q3 experiment conditions, metrics, evaluation protocol |
+
 ## File structure
 
 ```
@@ -36,8 +48,7 @@ football_adapt/
     └── test_smoke.py           a few basic tests
 ```
 
-Still to be added by the team (not included): `agents/belief_filter.py` (Bayesian filter),
-`agents/mappo.py` and `training/` (shared-policy PPO with GRU), `analysis/` (probes, metrics, plots).
+Still to be added by the team (not included): `agents/mappo.py` and `training/train.py` (shared-policy PPO with GRU), `analysis/` (probes, metrics, plots).
 
 ## How to use
 
@@ -69,7 +80,7 @@ python -m pytest -q
 
 ## Things to know before you trust any result
 
-1. **Every number in `configs/default.yaml` is a placeholder.** Calibrate them in Phase 0 and freeze them.
+1. **Numbers in `configs/default.yaml` are calibrated defaults but may need tuning.** Run Phase 0 checks first and freeze any values you change.
 2. **The playmaker effect has not been shown to work yet.** In a quick trial (not a proper experiment), a team with
    the playmaker scored about the same as without one. Phase 0 check D will likely fail until you tune the opponent
    (for example `opponent.attack.hub_bonus`, or make the playmaker's wider information matter more in
