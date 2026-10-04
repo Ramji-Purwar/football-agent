@@ -1,189 +1,174 @@
 # rendering.md: Match Visualization Guide
 
-This document covers how to render a match: what is currently implemented, what is missing, and how to build a proper game-quality 2D/3D renderer. An AI agent implementing the renderer should read this document completely before writing any code.
+## Game plane contract
+
+**The game is strictly 2D.** Every entity — players, ball, passes, shots — has only an `(x, y)` position. There is no height (z) component anywhere: not in physics, not in mechanics, not in observations. Passes and shots travel along the ground plane. The renderer must faithfully represent this: do not add height, arc, or elevation to any object.
+
+The chosen renderer is a **top-down 2D Pygame view** (`scripts/pygame_render.py`). It is the only renderer supported. The old matplotlib renderer (`live_render.py`) remains as a lightweight fallback but is no longer the primary tool.
 
 ---
 
-## 1. What Exists Now
+## 1. What the Old Renderer Had
 
-The current renderer lives in `football_adapt/scripts/live_render.py`. It uses **matplotlib** and is intentionally minimal.
+`scripts/live_render.py` (matplotlib) draws:
+- Green pitch rectangle, centre line, goal boxes
+- Players as circles (blue team 0, red team 1), player numbers inside
+- Ball as a black circle
+- Faint `×` for anchor positions
+- Vision circle for player 0 of team 0 only
+- Gold ring for the playmaker
+- Title bar with step, score, formations
 
-**What it draws:**
-- Green pitch rectangle with centre line and goal posts
-- Players as filled circles (blue = team 0, red = team 1)
-- Player numbers as text inside circles
-- Ball as a small black circle
-- Anchor positions as faint `×` markers
-- Vision radius circle for player 0 of team 0 (only when `show_vision=True`)
-- Gold ring around the playmaker if `sigma > 0`
-- Title bar: step `t`, score, formation names
+**Missing:** pass trajectory, shot indicator, event flashes, vision for all players, formation overlay, keyboard controls, speed > 30 fps.
 
-**How to run:**
-```bash
-cd football_adapt
-python -m scripts.live_render --mode scripted --T 400 --fps 10
-python -m scripts.live_render --mode random --radius 15 --sigma 3 --opp-mode SCHEDULED
+---
+
+## 2. Pygame Renderer (`scripts/pygame_render.py`)
+
+### 2.1 Window and coordinate mapping
+
+Pitch is 100 × 60 m. Window is 1080 × 720 px with a 50 px margin on all sides.
+
+```
+MARGIN   = 50       # px around pitch
+WIN_W    = 1080
+WIN_H    = 720
+PITCH_PX_W = WIN_W - 2 * MARGIN   # 980 px
+PITCH_PX_H = WIN_H - 2 * MARGIN   # 620 px
 ```
 
-**Flags:**
-| Flag | Default | Effect |
-|---|---|---|
-| `--mode` | `scripted` | `scripted` = both teams heuristic; `random` = our team random |
-| `--T` | 400 | Number of steps |
-| `--fps` | 10 | Render speed |
-| `--radius` | default cfg | Override vision radius |
-| `--sigma` | 0 | Playmaker index (1–5) |
-| `--opp-mode` | `NONE` | Formation switching mode |
-| `--seed` | 0 | Match seed |
-
-**Limitations:**
-- No trajectory arcs for passes or shots
-- No vision overlays for all players
-- No formation labels or formation geometry
-- No event annotations (goal, tackle, interception)
-- No speed control (pause/step) or scrubbing
-- Not a real-time game UI — matplotlib is not designed for interactive rendering
-- No depth or 3D perspective
-
----
-
-## 2. Renderer Architecture (Any Implementation)
-
-All rendering variants should follow this interface so they are interchangeable:
-
 ```python
-class MatchRenderer:
-    def reset(self, env: FootballEnv) -> None:
-        """Called once per episode to set up the scene."""
-
-    def step(self, env: FootballEnv, events: list) -> None:
-        """Called every step. Draw the current state plus any events from this step."""
-
-    def close(self) -> None:
-        """Clean up (close window, release GPU, etc.)."""
-```
-
-The renderer reads from the environment's public attributes:
-- `env.pos[team][i]` — player positions (world frame)
-- `env.ball_pos` — ball position
-- `env.anchors[team][i]` — anchor positions
-- `env.holder` — who holds the ball (`(team, i)` or `None`)
-- `env.ball_state` — `"held"`, `"loose"`, `"flight"`
-- `env.flight` — flight dict: `start`, `end`, `k`, `n` (current step / total steps)
-- `env.sigma_idx` — playmaker index (0-based) or `None`
-- `env.score`, `env.t`, `env.formation` — match info
-- `env.vision_radius(team, i)` — vision radius per player
-- `env.cfg` — config access
-
-**Never** read hidden state (e.g. opponent's undisclosed formation string during inference testing).
-
----
-
-## 3. Improved 2D Renderer (Pygame)
-
-### 3.1 Why Pygame
-
-Pygame runs at 60 fps, handles keyboard input natively, draws with hardware acceleration, and is pure Python. It is the best step-up from matplotlib for this use case.
-
-Install: `pip install pygame`
-
-### 3.2 Coordinate Mapping
-
-The pitch is 100 × 60 m. Map to a window of at least 900 × 600 px with a margin:
-
-```python
-MARGIN = 40     # px
-WIN_W, WIN_H = 1000, 680
-
-def world_to_screen(wx, wy, L=100.0, W=60.0):
-    sx = MARGIN + int(wx / L * (WIN_W - 2 * MARGIN))
-    sy = MARGIN + int((1 - wy / W) * (WIN_H - 2 * MARGIN))  # y flipped (screen y goes down)
+def w2s(wx, wy, L=100.0, W=60.0):
+    """World coords (m) → screen coords (px). y is flipped (screen y goes downward)."""
+    sx = MARGIN + int(wx / L * PITCH_PX_W)
+    sy = MARGIN + int((1.0 - wy / W) * PITCH_PX_H)
     return sx, sy
+
+def w2r(metres, L=100.0):
+    """World length (m) → screen pixels."""
+    return max(1, int(metres / L * PITCH_PX_W))
 ```
 
-### 3.3 What to Draw (complete checklist)
+### 2.2 What to Draw — Complete Checklist
 
-**Pitch:**
-- [ ] Green pitch rectangle with 4 px white border
-- [ ] Centre circle (radius ≈ 9 m in world units → scale to px)
-- [ ] Centre line
-- [ ] Goal posts at both ends (width `GOAL_W = 12` m, depth 2 m)
-- [ ] Penalty arcs or shooting zone arc (radius `D_SHOOT_MAX = 35` m from goal centre)
-- [ ] Formation anchor positions as faint `+` markers (only when `show_anchors=True`)
+**Pitch layer (drawn once per episode onto a background Surface):**
+- [ ] Dark green fill (`#2d5a27`)
+- [ ] Lighter green stripes alternating every 10 m along the length (subtle, `alpha ≈ 20`)
+- [ ] White pitch border (2 px)
+- [ ] Centre line (1 px white)
+- [ ] Centre circle: radius ≈ 9 m → `w2r(9)`
+- [ ] Goal boxes at both ends: width `GOAL_W = 12` m, depth 3 m, white outline
+- [ ] Shooting zone arc: arc of radius `35` m centered on each goal mouth (`D_SHOOT_MAX`)
+- [ ] Anchor positions as faint `+` (cross, alpha 60) in team colour — drawn when `show_anchors=True`
 
-**Players:**
-- [ ] Circle for each player, radius ≈ 1.4 m (scale to px)
-- [ ] Team colour fill (blue / red) with white stroke
-- [ ] Bold stroke when holding ball
-- [ ] Gold ring for playmaker
-- [ ] Player number inside circle (white text)
-- [ ] Frozen state: grey fill or striped pattern
-- [ ] Slot label (D/M/F) as a tiny subscript near the player
+**Players (every frame):**
+- [ ] Filled circle, radius `w2r(1.5)` px, team colour (blue `#2b6cb0` / red `#c53030`)
+- [ ] White border 2 px normally, gold 3 px for playmaker
+- [ ] Thicker border (4 px) when this player holds the ball
+- [ ] Frozen state: grey fill `#888`
+- [ ] Player number as white text, centered, font size 11
+- [ ] Slot label (D/M/F) as tiny coloured text below/above the circle
 
-**Vision radii (optional, toggle with `V` key):**
-- [ ] Dashed circle around each player of team 0 (our side)
-- [ ] Fill the vision circle with a transparent colour (alpha 10–20%)
-- [ ] Overlap between our players makes combined coverage visible
+**Ball (every frame):**
+- [ ] White circle, radius `w2r(0.9)`, outlined black 1 px
+- [ ] When `ball_state == "held"`: draw a thin line from holder to ball position (they are the same point, so this just confirms possession visually — skip)
+- [ ] When `ball_state == "flight"`: see pass/shot section below
 
-**Ball:**
-- [ ] Black circle, radius ≈ 0.8 m
-- [ ] White pentagon texture (draw 5 curved patches) for realistic football look
+**Pass in flight:**
+- [ ] Dotted white line from `flight["start"]` to `flight["end"]`
+- [ ] Ball moves along this line at `flight["k"] / flight["n"]` fraction
+- [ ] Draw a small arrow at the ball's current position pointing toward the end
 
-**Pass / shot in flight:**
-- [ ] Dotted line from passer to target while ball is in flight
-- [ ] Ball moves along the line
-- [ ] When a shot is in flight: draw a goal-line indicator (see Section 4)
+**Shot in flight:**
+- [ ] Same as pass but line is red/orange
+- [ ] Goal-mouth indicator: a small coloured bar on the near goal-line showing where the shot is aimed
 
-**Events (flash animations, fade after 20 frames):**
-- [ ] Goal: large flash overlay ("GOAL!" text, team colour)
-- [ ] Tackle: small spark effect at tackle position
-- [ ] Interception: yellow star at interception point
-- [ ] Pass completed: brief green arc
-- [ ] Turnover (pass intercepted): brief red arc
+**Shot probability indicator (when any player holds the ball in the shoot zone):**
+- [ ] Small bar at bottom-right of screen: `"Shoot p: 0.62  ████████░░"`
+- [ ] Colour: green if `p > 0.5`, yellow if `0.25 < p <= 0.5`, red if `p <= 0.25`
+- [ ] Only shown for the player currently holding the ball
 
-**HUD (top bar):**
-- [ ] Score: "Our Team 2 – 1 Opponent"
-- [ ] Step counter and time fraction
-- [ ] Both formations
-- [ ] Possession indicator (coloured dot)
-- [ ] Playmaker indicator if sigma > 0
+**Vision radius display (toggle `V`):**
+- [ ] For each of OUR 5 players (team 0): semi-transparent circle, team colour, alpha 25
+- [ ] Overlap between players makes combined coverage brighter (natural alpha blend)
 
-**Controls (keyboard):**
-- [ ] `SPACE` — pause / resume
-- [ ] `→` — step one frame (while paused)
-- [ ] `+`/`-` — increase/decrease fps (1–60)
-- [ ] `V` — toggle vision radius display
-- [ ] `A` — toggle anchor display
-- [ ] `F` — toggle formation overlay (ghost positions for both formations)
-- [ ] `R` — restart from seed 0
-- [ ] `Q` / `Esc` — quit
+**Formation ghost overlay (toggle `F`):**
+- [ ] Show anchor positions of all 5 formations as ghost circles (outline only, small, labelled)
+- [ ] Current formation anchors shown solid; others shown faded
+- [ ] Useful for seeing what formation the opponent might be in
 
-### 3.4 Pygame Main Loop Sketch
+**HUD (top bar, always visible):**
+- [ ] Score: `"OUR  2 – 1  OPP"` centered, large font
+- [ ] Step and time: `"t=480 / 1200  (40%)"` right-aligned
+- [ ] Our formation and opponent's last known formation: left-aligned
+- [ ] Possession dot: coloured circle (blue=ours, red=opp, grey=loose)
+- [ ] Playmaker indicator: `"★ PM: player 3"` if sigma > 0
+
+**Event flashes (fade out over 40 frames):**
+- [ ] Goal: full-screen overlay `"GOAL!"` in scoring team's colour, alpha fades 200→0
+- [ ] Tackle success: yellow spark (4 lines) at tackle position, fades over 20 frames
+- [ ] Interception: orange `"INT"` text at interception point, fades 20 frames
+- [ ] Pass completed: brief green dot at receiver, 15 frames
+- [ ] Turnover (pass intercepted by opponent): red `"LOST"` at passer position, 15 frames
+
+### 2.3 Keyboard Controls
+
+| Key | Action |
+|---|---|
+| `SPACE` | Pause / resume |
+| `→` | Step one frame while paused |
+| `↑` / `↓` | Increase / decrease FPS (range 1–60) |
+| `V` | Toggle vision radius display |
+| `A` | Toggle anchor markers |
+| `F` | Toggle formation ghost overlay |
+| `R` | Restart from seed 0 |
+| `1`–`5` | Highlight player 1–5 of our team |
+| `Q` / `Esc` | Quit |
+
+### 2.4 Main Loop Structure
 
 ```python
-import pygame, sys
-
-def run_pygame(env, agent=None, fps=30):
+def run(env, agent=None, fps=30, seed=0):
     pygame.init()
     screen = pygame.display.set_mode((WIN_W, WIN_H))
+    pygame.display.set_caption("Football Agent — Top-down View")
     clock = pygame.time.Clock()
+
+    obs, _ = env.reset(seed=seed)
+    bg = build_background(env)    # static pitch surface, rebuilt on reset
+
     paused = False
     show_vision = False
+    show_anchors = True
+    show_formation_ghost = False
+    flashes = []                  # list of active flash animations
 
-    obs, _ = env.reset(seed=0)
     while True:
+        # --- events ---
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit(); sys.exit()
+                pygame.quit(); return
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE: paused = not paused
-                if event.key == pygame.K_v: show_vision = not show_vision
-                # ... other keys
+                handle_key(event.key, ...)
 
+        # --- step ---
         if not paused and not env.done:
             actions = agent.act(obs) if agent else None
             obs, _, done, info = env.step(actions)
-            draw(screen, env, info["events"], show_vision)
+            for ev in info["events"]:
+                flashes.append(make_flash(ev, env))
+
+        # --- draw ---
+        screen.blit(bg, (0, 0))
+        if show_anchors:   draw_anchors(screen, env)
+        if show_formation_ghost: draw_formation_ghosts(screen, env)
+        draw_flight(screen, env)
+        draw_players(screen, env)
+        draw_ball(screen, env)
+        if show_vision:    draw_vision(screen, env)
+        draw_shot_indicator(screen, env)
+        draw_flashes(screen, flashes)
+        draw_hud(screen, env, fps)
 
         clock.tick(fps)
         pygame.display.flip()
@@ -191,311 +176,132 @@ def run_pygame(env, agent=None, fps=30):
 
 ---
 
-## 4. Shot Trajectory Visualization
+## 3. Shot Probability Display
 
-When a shot is taken (`SHOOT` action), show the trajectory in real-time.
-
-### 4.1 What to Draw
-
-**On the pitch:**
-1. A curved arc from the shooter to the goal (parabolic in 2.5D if using perspective, straight line in flat 2D).
-2. An "aim indicator" cone showing the shot direction and spread. The half-angle of the cone corresponds to the shot miss spread parameter.
-3. The ball moves along the arc at `V_PASS` speed.
-4. If it scores: ball crosses the goal line, flash effect.
-5. If it misses: ball veers off to a point near the goal line. Draw the deviation visually.
-
-**Goal-mouth indicator (always visible when in shooting zone):**
-- Draw the goal mouth as a vertical bar on the right side of the screen (or at the goal end) — a "goal target" showing where the ball would go based on current aim.
-- Show a coloured segment indicating the predicted scoring probability (green = high p, red = low).
-- This appears while any player of either team is in the shooting zone and holds the ball.
-
-### 4.2 Probability Display
-
-When the carrier is in the shoot zone, display:
-```
-Shoot prob: 0.62  ████████░░
-```
-Compute it: `shot_probability(pos, goal, visible_defenders, control, ...)` from `mechanics.py`.
-
-### 4.3 Implementation (Pygame)
+When the ball holder is inside `D_SHOOT_MAX = 35` m of the opponent goal, show this in the HUD:
 
 ```python
 from football.mechanics import shot_probability
-from football.geometry import to_frame
+from football.geometry import to_frame, dist
 
-def draw_shot_indicator(screen, env):
+def draw_shot_indicator(screen, env, font):
     if env.holder is None:
         return
     ht, hi = env.holder
     me_w = env.pos[ht][hi]
-    me = to_frame(ht, me_w, env.L, env.W)
-    goal = np.array([env.L, env.W / 2])
-    d = dist(me, goal)
-    if d > env.cfg.mechanics.shoot_max:
+    me_tf = to_frame(ht, me_w, env.L, env.W)
+    goal_tf = np.array([env.L, env.W / 2])
+    if dist(me_tf, goal_tf) > env.cfg.mechanics.shoot_max:
         return
-    defs = [env.pos[1 - ht][j] for j in range(5)]
-    p = shot_probability(me, goal, defs, env.control(ht, hi),
-                         env.cfg.mechanics.p_max, env.cfg.mechanics.d0,
+    defs_w = [env.pos[1 - ht][j] for j in range(5)]
+    defs_tf = [to_frame(ht, d, env.L, env.W) for d in defs_w]
+    p = shot_probability(me_tf, goal_tf, defs_tf,
+                         env.control(ht, hi),
+                         env.cfg.mechanics.p_max,
+                         env.cfg.mechanics.d0,
                          env.cfg.mechanics.shot_block_scale)
-    # draw probability bar, aim cone, etc.
+    # Draw bar
+    bar_x, bar_y = WIN_W - 200, WIN_H - 40
+    bar_w = 150
+    colour = (60, 180, 60) if p > 0.5 else (220, 180, 0) if p > 0.25 else (200, 60, 60)
+    pygame.draw.rect(screen, (50, 50, 50), (bar_x, bar_y, bar_w, 18))
+    pygame.draw.rect(screen, colour, (bar_x, bar_y, int(bar_w * p), 18))
+    label = font.render(f"Shoot p: {p:.2f}", True, (255, 255, 255))
+    screen.blit(label, (bar_x, bar_y - 18))
 ```
 
 ---
 
-## 5. 3D Perspective Renderer
+## 4. Pass Trajectory (Ground-Level)
 
-A full 3D renderer significantly improves visual communication, especially for presentations and demos. This section describes two feasible approaches.
-
-### 5.1 Approach A: Pygame + Isometric Projection (Recommended — Pure Python)
-
-Use a **2.5D isometric projection** rather than full 3D. This looks like a classic football management game (Football Manager, Sensible Soccer). It is achievable in pure Python/Pygame without a 3D engine.
-
-**Projection formula:**
+Since the game is 2D (no height), the pass travels along a straight line on the ground. Render it as a dashed white line from release point to destination, with the ball dot moving along it.
 
 ```python
-def world_to_iso(wx, wy, wz=0.0, tile_w=20, tile_h=10):
-    # wx, wy: pitch coords (0..L, 0..W); wz: height above pitch
-    sx = (wx - wy) * (tile_w / 2)
-    sy = (wx + wy) * (tile_h / 2) - wz * tile_h
-    return int(SCREEN_CX + sx), int(SCREEN_CY + sy)
+def draw_flight(screen, env):
+    if env.ball_state != "flight" or env.flight is None:
+        return
+    f = env.flight
+    ht = f["passer"][0]
+    is_shot = False  # shots go through _shoot not _pass, ball_state becomes loose immediately
+    start = w2s(*f["start"])
+    end   = w2s(*f["end"])
+    colour = (255, 255, 255)
+    # Dashed line
+    draw_dashed_line(screen, colour, start, end, dash=8, gap=6)
+    # Ball position
+    t = min(1.0, f["k"] / max(1, f["n"]))
+    bx = int(start[0] + (end[0] - start[0]) * t)
+    by = int(start[1] + (end[1] - start[1]) * t)
+    pygame.draw.circle(screen, (255, 255, 255), (bx, by), w2r(0.9))
+    pygame.draw.circle(screen, (0, 0, 0), (bx, by), w2r(0.9), 1)
+
+def draw_dashed_line(surface, colour, start, end, dash=8, gap=5):
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    length = max(1, int((dx**2 + dy**2) ** 0.5))
+    ux, uy = dx / length, dy / length
+    pos = 0
+    drawing = True
+    while pos < length:
+        seg = dash if drawing else gap
+        x0 = int(start[0] + ux * pos)
+        y0 = int(start[1] + uy * pos)
+        x1 = int(start[0] + ux * min(pos + seg, length))
+        y1 = int(start[1] + uy * min(pos + seg, length))
+        if drawing:
+            pygame.draw.line(surface, colour, (x0, y0), (x1, y1), 2)
+        pos += seg
+        drawing = not drawing
 ```
-
-**What changes in 3D:**
-- Pitch is a diamond shape (isometric rectangle)
-- Goal posts have height (draw vertical lines + crossbar)
-- The ball has a height component: `wz > 0` during flight (parabolic arc)
-- Players cast shadows on the pitch
-- Shot arc is a visible parabola above the pitch
-
-**Ball height during flight:**
-```python
-def ball_height(flight_dict):
-    k = flight_dict["k"]
-    n = flight_dict["n"]
-    t = k / n                        # 0 → 1 during flight
-    return 4.0 * t * (1 - t) * MAX_HEIGHT   # parabola peaking at midpoint
-```
-
-Suggested `MAX_HEIGHT`: 3.0 m for passes, 5.0 m for shots.
-
-**Draw order (painter's algorithm):**
-1. Pitch (back to front in isometric order)
-2. Anchor markers
-3. Player shadows (flat ellipses on pitch)
-4. Players (back row first, front row last to handle overlap correctly)
-5. Ball
-6. Pass/shot arc
-7. HUD
-
-### 5.2 Approach B: Three.js Web Renderer (Best Visual Quality)
-
-Use a web server that streams game state as JSON and renders it in the browser with Three.js.
-
-**Architecture:**
-```
-Python env  →  WebSocket server  →  Browser (Three.js scene)
-```
-
-**Setup:**
-```bash
-pip install websockets
-# client: Three.js loaded from CDN in browser
-```
-
-**Python side** (emit state each step):
-```python
-import asyncio, json, websockets
-
-async def broadcast_state(env, ws):
-    state = {
-        "t": env.t, "score": env.score,
-        "players": [{"team": t, "i": i, "pos": env.pos[t][i].tolist(),
-                     "has_ball": env.holder == (t, i)}
-                    for t in (0,1) for i in range(5)],
-        "ball": env.ball_pos.tolist(),
-        "ball_state": env.ball_state,
-        "sigma": env.sigma_idx,
-    }
-    await ws.send(json.dumps(state))
-```
-
-**Three.js scene** (browser side):
-- Flat green pitch plane
-- Cylinder players with team colour materials
-- Sphere ball
-- Actual 3D parabolic shot trajectory (TubeGeometry along a bezier curve)
-- Spot lights casting player shadows
-- Orbit controls for camera rotation (zoom in/out, rotate around pitch)
-- Stats panel in HTML overlay
-
-**Bezier arc for shot trajectory:**
-```javascript
-const start = new THREE.Vector3(ball.x, 0, ball.z);
-const end   = new THREE.Vector3(goal.x, 0, goal.z);
-const mid   = start.clone().add(end).multiplyScalar(0.5);
-mid.y = 5.0;  // peak height
-const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
-const points = curve.getPoints(50);
-const geometry = new THREE.BufferGeometry().setFromPoints(points);
-```
-
-**Goal post geometry (Three.js):**
-```javascript
-function makeGoalPost(x, W) {
-    const group = new THREE.Group();
-    const postMat = new THREE.MeshStandardMaterial({color: 0xffffff});
-    const postGeo = new THREE.CylinderGeometry(0.12, 0.12, 3.0, 8);
-    // left post, right post, crossbar
-    const lp = new THREE.Mesh(postGeo, postMat);
-    lp.position.set(x, 1.5, W/2 - 6);
-    group.add(lp);
-    // ... right post and crossbar similarly
-    return group;
-}
-```
-
-### 5.3 Approach C: Panda3D or Ursina (Pure Python 3D)
-
-For a self-contained Python 3D renderer without a web browser:
-
-```bash
-pip install ursina
-```
-
-Ursina is simpler than Panda3D and suits rapid prototyping. Create `Entity` objects for pitch, players, and ball. Use `camera.position` and `camera.rotation` to set a top-down or angled view. Ball parabola via updating `ball.y` each frame.
-
-This is the best option if you need a **standalone executable** with real 3D and no browser.
 
 ---
 
-## 6. Best Practices
-
-### 6.1 Decouple Physics from Rendering
-
-The environment steps at whatever speed the training loop requires (potentially thousands of steps per second). The renderer should operate independently:
+## 5. Vision Coverage Overlay
 
 ```python
-# Good: renderer reads env state after step
-env.step(actions)
-renderer.step(env, events)
-
-# Bad: renderer is called inside env.step()
-```
-
-For training, pass `renderer=None` and skip all rendering calls entirely.
-
-### 6.2 Event-Driven Animations
-
-The step returns `info["events"]` — a list of dicts like `{"type": "goal", "team": 0}`. Consume this list in the renderer to trigger one-shot animations. Don't derive events from state deltas.
-
-```python
-for ev in info["events"]:
-    if ev["type"] == "goal":
-        renderer.trigger_goal_flash(ev["team"])
-    elif ev["type"] == "tackle":
-        renderer.trigger_tackle_spark(ev.get("by"))
-```
-
-### 6.3 Camera Modes
-
-Offer at least two camera modes:
-
-| Mode | Description | Best for |
-|---|---|---|
-| Top-down orthographic | Flat 2D view, full pitch visible | Debugging, formation analysis |
-| Isometric | 2.5D angled view, full pitch | Demo and presentation |
-| Follow ball | Camera tracks ball, ¾ angle | Gameplay feel |
-| Follow player | Camera tracks a specific player | Vision radius debugging |
-
-Switch with a key (e.g. `C`).
-
-### 6.4 Formation Overlay
-
-A **ghost overlay** (toggle with `F`) shows the anchor positions of both formations as transparent player-shaped ghosts. This helps compare the current opponent positions against each possible formation — exactly what the belief filter is doing.
-
-```python
-def draw_formation_ghost(screen, env, formation_name, team, alpha=60):
-    anchors = env.book.anchors_team_frame(formation_name)  # (5, 2) team frame
-    for i, a_tf in enumerate(anchors):
-        a_w = to_frame(team, a_tf, env.L, env.W)   # back to world
-        sx, sy = world_to_screen(*a_w)
-        ghost = pygame.Surface((20, 20), pygame.SRCALPHA)
-        color = (*TEAM_COLORS[team], alpha)
-        pygame.draw.circle(ghost, color, (10, 10), 10)
-        screen.blit(ghost, (sx - 10, sy - 10))
-```
-
-### 6.5 Replay Mode
-
-Save match state to a list of dicts during a match, then replay at any speed:
-
-```python
-replay_buffer = []
-while not env.done:
-    obs, r, done, info = env.step(actions)
-    replay_buffer.append({
-        "pos": env.pos.copy(),
-        "ball": env.ball_pos.copy(),
-        "holder": env.holder,
-        "events": info["events"],
-        "score": list(env.score),
-        "t": env.t,
-    })
-# Then replay_buffer[t] gives the state at step t
-```
-
-### 6.6 Vision Coverage Map
-
-A useful debug view: a heatmap overlay showing **how much of the pitch is currently visible** to our team. Build it once per step:
-
-```python
-import numpy as np
-
-def vision_coverage(env, team=0, resolution=50):
-    xs = np.linspace(0, env.L, resolution)
-    ys = np.linspace(0, env.W, resolution)
-    covered = np.zeros((resolution, resolution), bool)
+def draw_vision(screen, env):
     for i in range(5):
-        for xi, x in enumerate(xs):
-            for yi, y in enumerate(ys):
-                d = dist(env.pos[team][i], np.array([x, y]))
-                if d <= env.vision_radius(team, i):
-                    covered[yi, xi] = True
-    return covered
+        rho = env.vision_radius(0, i)
+        if not np.isfinite(rho):
+            continue
+        p = env.pos[0][i]
+        cx, cy = w2s(*p)
+        r_px = w2r(rho)
+        surf = pygame.Surface((r_px * 2, r_px * 2), pygame.SRCALPHA)
+        pygame.draw.circle(surf, (43, 108, 176, 30), (r_px, r_px), r_px)
+        pygame.draw.circle(surf, (43, 108, 176, 80), (r_px, r_px), r_px, 1)
+        screen.blit(surf, (cx - r_px, cy - r_px))
 ```
 
-Render as a green-tinted overlay. Red areas = blind spots.
-
-### 6.7 Performance Notes
-
-- For matplotlib: `ax.clear()` is slow. Use `set_data` on existing artists to update them instead of redrawing.
-- For Pygame: draw the static pitch background to a Surface once on reset; blit it each frame instead of redrawing rectangles.
-- For Three.js: update object positions via `object.position.set(...)` rather than creating new objects each frame.
-- Vision coverage map is expensive at high resolution. Compute at 20×12 or 25×15 and upscale.
-
 ---
 
-## 7. Implementation Roadmap
+## 6. Running the Renderer
 
-| Phase | What to build | Effort |
+```bash
+cd football_adapt
+.venv/bin/python -m scripts.pygame_render --mode scripted --fps 20
+.venv/bin/python -m scripts.pygame_render --mode random --sigma 3 --opp-mode SCHEDULED --fps 15
+```
+
+Flags:
+
+| Flag | Default | Effect |
 |---|---|---|
-| 1 (immediate) | Improved matplotlib: pass trajectory dotted line, shot probability bar | 1 day |
-| 2 | Pygame 2D: full checklist in Section 3, all events, keyboard controls | 2–3 days |
-| 3 | Pygame isometric: 2.5D with ball height, shadow, goal posts | 3–5 days |
-| 4 | Replay mode + formation overlay + vision heatmap | 1–2 days |
-| 5 | Three.js 3D web renderer OR Ursina standalone | 3–5 days |
-
-Start with Phase 2 (Pygame 2D). It covers all the essential visual communication and is the fastest to implement correctly. The isometric view (Phase 3) is worthwhile for the project report and demos.
+| `--mode` | `scripted` | `scripted` = both teams heuristic; `random` = our team random |
+| `--T` | 1200 | Match length in steps |
+| `--fps` | 20 | Starting FPS |
+| `--radius` | cfg default | Override vision radius |
+| `--sigma` | 0 | Playmaker player number (1–5) |
+| `--opp-mode` | `NONE` | Formation switching mode |
+| `--seed` | 0 | Match seed |
+| `--no-anchors` | off | Disable anchor markers on startup |
 
 ---
 
-## 8. File Locations
+## 7. File Locations
 
 | File | Purpose |
 |---|---|
-| `football_adapt/scripts/live_render.py` | Current matplotlib renderer |
-| `football_adapt/scripts/watch_match.py` | Skeleton for replay/watch script |
-| *(to create)* `football_adapt/scripts/pygame_render.py` | Pygame 2D renderer |
-| *(to create)* `football_adapt/scripts/iso_render.py` | Isometric renderer |
-| *(to create)* `football_adapt/scripts/web_render/` | Three.js renderer (server + HTML) |
-| *(to create)* `football_adapt/rendering/` | Shared rendering utilities (coordinate transforms, colours, event flash manager) |
+| `football_adapt/scripts/live_render.py` | Legacy matplotlib renderer (fallback) |
+| `football_adapt/scripts/pygame_render.py` | **Primary renderer — top-down Pygame 2D** |
+| `football_adapt/scripts/watch_match.py` | Replay / GIF export (uses pygame renderer) |

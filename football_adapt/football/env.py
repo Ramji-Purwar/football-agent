@@ -107,8 +107,28 @@ class FootballEnv:
         self.flight = None
         k = self.book.kickoff_slot(self.formation[team_with_ball])
         self.holder = (team_with_ball, k)
-        self.ball_pos = self.pos[team_with_ball][k].copy()
+
+        # Kickoff player stands at the centre spot.
+        centre = np.array([self.L / 2, self.W / 2])
+        self.pos[team_with_ball][k] = centre.copy()
+        self.ball_pos = centre.copy()
         self.ball_state = "held"
+
+        # Every other player must be inside their own half.
+        # Team 0 owns x < L/2; team 1 owns x > L/2.
+        # If a player's anchor is across the line, pull them back 3 m inside their half
+        # but keep their anchor y so they spread naturally across the pitch width.
+        HALF_MARGIN = 3.0
+        mid = self.L / 2
+        for team in (0, 1):
+            for i in range(5):
+                if team == team_with_ball and i == k:
+                    continue  # kickoff player is already at centre
+                x = self.pos[team][i][0]
+                if team == 0 and x >= mid:
+                    self.pos[team][i][0] = mid - HALF_MARGIN
+                elif team == 1 and x <= mid:
+                    self.pos[team][i][0] = mid + HALF_MARGIN
 
     # ------------------------------------------------------------------ outputs
     def _obs_out(self):

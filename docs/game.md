@@ -50,7 +50,7 @@ We build a small 2D football game and train a team of AI players to play it.
 | `T` | 1200 steps | Match length |
 | `T_HALF` | 600 steps | Halftime marker (for scheduled switches only; no side swap) |
 
-- **Pitch:** a bounded 2D rectangle. The ball moves on the ground only (no aerial passes).
+- **Pitch:** a bounded 2D rectangle. The entire game is played in a single 2D plane — every entity (players, ball, passes, shots) has only an `(x, y)` position. There is no height (z) component anywhere in the physics, observations, or mechanics. Passes and shots travel along the ground.
 - **Goals:** one at each end of the length axis, width `GOAL_W`, centered. No goalkeeper.
 - **Team frame:** each team always attacks toward **+x in its own frame**. The environment stores world coordinates and calls `geometry.to_frame()` before giving a player its observation. The opponent controller receives mirrored coordinates, so its code is identical to ours. No halftime side swap is needed.
 - **One step:** all 10 players choose one action simultaneously, then the world updates once.
