@@ -1,0 +1,5 @@
+numpy
+pyyaml
+matplotlib   # only for scripts/watch_match.py
+pillow       # only for saving GIFs
+pytest       # only for tests
