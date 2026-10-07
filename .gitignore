@@ -18,6 +18,8 @@ htmlcov/
 *.gif
 *.mp4
 *.png
+# ... except the pictures used by the docs
+!docs/img/**/*.png
 
 # IDEs and Editors
 .vscode/

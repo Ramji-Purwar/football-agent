@@ -27,27 +27,27 @@ The chosen renderer is a **top-down 2D Pygame view** (`scripts/pygame_render.py`
 
 ### 2.1 Window and coordinate mapping
 
-Pitch is 100 × 60 m. Window is 1080 × 720 px with a 50 px margin on all sides.
+Pitch is 100 × 60 m. The window opens at 1280 × 800 px and can be resized. `set_layout(w, h)` lays everything out for the current window size (it runs at start and on every resize), so the picture is always drawn at native resolution, never scaled:
 
-```
-MARGIN   = 50       # px around pitch
-WIN_W    = 1080
-WIN_H    = 720
-PITCH_PX_W = WIN_W - 2 * MARGIN   # 980 px
-PITCH_PX_H = WIN_H - 2 * MARGIN   # 620 px
-```
+- top bar `HUD_H` (scoreboard, clock, status) and bottom bar `FOOT_H` (match stats, shot chance, key hints);
+- the pitch keeps its true 100:60 proportions and is centred between the bars, with room left behind each goal line for the goals;
+- text sizes scale with the window (`UI` = scale relative to 1280 × 800).
 
 ```python
 def w2s(wx, wy, L=100.0, W=60.0):
     """World coords (m) → screen coords (px). y is flipped (screen y goes downward)."""
-    sx = MARGIN + int(wx / L * PITCH_PX_W)
-    sy = MARGIN + int((1.0 - wy / W) * PITCH_PX_H)
+    sx = PX0 + int(wx / L * PITCH_PX_W)          # (PX0, PY0) = top-left pixel of the pitch
+    sy = PY0 + int((1.0 - wy / W) * PITCH_PX_H)
     return sx, sy
 
 def w2r(metres, L=100.0):
     """World length (m) → screen pixels."""
     return max(1, int(metres / L * PITCH_PX_W))
 ```
+
+![The viewer window](img/viewer.png)
+
+*The viewer during a match: scoreboard, clock and status on top, live stats and key hints at the bottom. Annotated pictures of how the scripted team plays are in `opponent.md`; both are made by `scripts/doc_screenshots.py`.*
 
 ### 2.2 What to Draw — Complete Checklist
 
@@ -97,12 +97,18 @@ def w2r(metres, L=100.0):
 - [ ] Current formation anchors shown solid; others shown faded
 - [ ] Useful for seeing what formation the opponent might be in
 
-**HUD (top bar, always visible):**
-- [ ] Score: `"OUR  2 – 1  OPP"` centered, large font
-- [ ] Step and time: `"t=480 / 1200  (40%)"` right-aligned
-- [ ] Our formation and opponent's last known formation: left-aligned
-- [ ] Possession dot: coloured circle (blue=ours, red=opp, grey=loose)
-- [ ] Playmaker indicator: `"★ PM: player 3"` if sigma > 0
+**Top bar (always visible):**
+- Scoreboard, centred: team name with its shape and colour on either side of the score; under each name its formation and play style (and the playmaker for red if sigma > 0). The team in possession is underlined.
+- Left: step count, which half, and a LIVE / PAUSED / FULL TIME tag.
+- Right: seed, fps, and the overlays that are switched on.
+- Progress bar along the bottom edge with a half-time tick.
+
+**Bottom bar (always visible):**
+- Live stats, each as blue value · label · red value: possession, shots, passes, pass accuracy, tackles won.
+- Shot-chance bar on the right while the ball holder is in shooting range.
+- Key hints.
+
+**Full time:** a result card in the centre of the pitch (winner, score, "press R for a new match").
 
 **Event flashes (fade out over 40 frames):**
 - [ ] Goal: full-screen overlay `"GOAL!"` in scoring team's colour, alpha fades 200→0
@@ -121,7 +127,10 @@ def w2r(metres, L=100.0):
 | `V` | Toggle vision radius display |
 | `A` | Toggle anchor markers |
 | `F` | Toggle formation ghost overlay |
-| `R` | Restart from seed 0 |
+| `R` | New match with a random seed (shown in the top bar and the window title) |
+| `Shift`+`R` | Replay the current match (same seed) |
+| `Z` / `X` | Next play style for the blue / red team, applied at once (normal → aggressive → defensive) |
+| `N` / `M` | Next formation for the blue / red team (2-2-1 → 2-1-2 → 1-3-1 → 1-2-2 → 3-1-1). Players walk to the new anchors |
 | `1`–`5` | Highlight player 1–5 of our team |
 | `Q` / `Esc` | Quit |
 
@@ -281,6 +290,8 @@ def draw_vision(screen, env):
 cd football_adapt
 .venv/bin/python -m scripts.pygame_render --mode scripted --fps 20
 .venv/bin/python -m scripts.pygame_render --mode random --sigma 3 --opp-mode SCHEDULED --fps 15
+.venv/bin/python -m scripts.pygame_render --style aggressive --opp-style defensive
+.venv/bin/python -m scripts.pygame_render --formation 1-3-1 --opp-formation 3-1-1
 ```
 
 Flags:
@@ -294,6 +305,10 @@ Flags:
 | `--sigma` | 0 | Playmaker player number (1–5) |
 | `--opp-mode` | `NONE` | Formation switching mode |
 | `--seed` | 0 | Match seed |
+| `--style` | cfg default | Play style of the blue team: `normal`, `aggressive` or `defensive` |
+| `--opp-style` | cfg default | Play style of the red team |
+| `--formation` | cfg default | Formation of the blue team: `2-2-1`, `2-1-2`, `1-3-1`, `1-2-2` or `3-1-1` |
+| `--opp-formation` | cfg default | Formation of the red team (its starting formation if `--opp-mode` switches) |
 | `--no-anchors` | off | Disable anchor markers on startup |
 
 ---

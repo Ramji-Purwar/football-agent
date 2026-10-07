@@ -21,8 +21,13 @@ def shot_openness(shooter, goal_center, defenders, scale: float) -> float:
     return o
 
 
-def shot_probability(shooter, goal_center, defenders, c: float, p_max: float, d0: float, scale: float) -> float:
-    """p = P_MAX * exp(-d / D0) * openness * c_shooter."""
+def shot_probability(shooter, goal_center, defenders, c: float, p_max: float, d0: float, scale: float,
+                     sure=None) -> float:
+    """p = P_MAX * exp(-d / D0) * openness * c_shooter.
+
+    sure = (depth, half_width) of the goal area: a shot from inside it always scores (there is no goalkeeper)."""
+    if sure is not None and abs(shooter[0] - goal_center[0]) <= sure[0] and abs(shooter[1] - goal_center[1]) <= sure[1]:
+        return 1.0
     d = dist(shooter, goal_center)
     return float(p_max * np.exp(-d / d0) * shot_openness(shooter, goal_center, defenders, scale) * c)
 
@@ -48,3 +53,9 @@ def pass_interception(passer, target, defenders, v_pass: float, v_player: float,
 def tackle_probability(c_def: float, c_carrier: float) -> float:
     """p_win = c_defender / (c_defender + c_carrier)."""
     return c_def / (c_def + c_carrier)
+
+
+def sure_goal(m):
+    """The goal area as (depth, half_width) for shot_probability, or None if the rule is off."""
+    sg = m.sure_goal
+    return (sg.depth, sg.half_width) if sg.enabled else None

@@ -28,6 +28,7 @@ class FormationBook:
             assert a.shape == (5, 2), f"{name}: need 5 anchors"
             self.formations[name] = Formation(name, slot_types_from_name(name), a)
         self.names = list(self.formations.keys())
+        self.phases = cfg.formations.phases
 
     def __getitem__(self, name) -> Formation:
         return self.formations[name]
@@ -35,9 +36,20 @@ class FormationBook:
     def index(self, name) -> int:
         return self.names.index(name)
 
-    def anchors_team_frame(self, name):
-        """Anchors in the team frame, world units. Shape (5, 2)."""
-        return self.formations[name].anchors_frac * np.array([self.L, self.W])
+    def anchors_team_frame(self, name, phase: float = 0.0, phases=None):
+        """Anchors in the team frame, world units. Shape (5, 2).
+
+        phase in [-1, 1] blends the base shape toward the defending shape (-1) or the attacking shape (+1).
+        Each shape keeps the same slots but puts every line (D/M/F) at its own depth and rescales the width.
+        phases = the shapes to use (a team's play style can have its own); default = the config's."""
+        f = self.formations[name]
+        a = f.anchors_frac.copy()
+        ph = self.phases if phases is None else phases
+        if phase != 0.0 and ph.enabled:
+            sh = ph.attack if phase > 0 else ph.defend
+            tgt = np.array([[sh.x[t], 0.5 + (y - 0.5) * sh.y_scale] for t, (_, y) in zip(f.slot_types, a)])
+            a += min(abs(phase), 1.0) * (tgt - a)
+        return a * np.array([self.L, self.W])
 
     def kickoff_slot(self, name) -> int:
         """Player index (0-based) who takes the kickoff: the first forward."""

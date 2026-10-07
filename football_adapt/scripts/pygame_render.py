@@ -6,6 +6,11 @@ This renderer faithfully represents that with a top-down pitch view.
 Run from football_adapt/:
     .venv/bin/python -m scripts.pygame_render --mode scripted --fps 20
     .venv/bin/python -m scripts.pygame_render --mode random --sigma 3 --opp-mode SCHEDULED
+    .venv/bin/python -m scripts.pygame_render --style aggressive --opp-style defensive
+    .venv/bin/python -m scripts.pygame_render --formation 1-3-1 --opp-formation 3-1-1
+
+Keys: Space pause, Right step, Up/Down speed, R new match (random seed), Shift+R replay, Z / X next play style
+for blue / red, N / M next formation for blue / red, V vision, A anchors, F formations, 1-5 highlight, Q quit.
 """
 from __future__ import annotations
 import argparse
@@ -17,7 +22,7 @@ import sys
 
 from football import FootballEnv, load_config
 from football.geometry import to_frame, dist
-from football.mechanics import shot_probability
+from football.mechanics import shot_probability, sure_goal
 from agents import RandomAgent
 
 
@@ -68,23 +73,43 @@ def _make_font(size: int, bold: bool = False) -> _FTFont:
 _FONTS: dict = {}
 
 
-def _init_fonts():
-    _FONTS["hud"]    = _make_font(26, bold=True)
-    _FONTS["small"]  = _make_font(13)
-    _FONTS["med"]    = _make_font(18, bold=True)
-    _FONTS["big"]    = _make_font(52, bold=True)
-    _FONTS["player"] = _make_font(11, bold=True)
-    _FONTS["slot"]   = _make_font( 8)
-    _FONTS["tiny"]   = _make_font( 9)
+def _init_fonts(ui: float = 1.0):
+    """(Re)build every font at the current UI scale, so text stays sharp at any window size."""
+    z = lambda n: max(7, int(round(n * ui)))
+    _FONTS["hud"]    = _make_font(z(30), bold=True)   # score
+    _FONTS["team"]   = _make_font(z(15), bold=True)   # team names
+    _FONTS["small"]  = _make_font(z(13))
+    _FONTS["med"]    = _make_font(z(18), bold=True)
+    _FONTS["big"]    = _make_font(z(52), bold=True)
+    _FONTS["player"] = _make_font(z(12), bold=True)
+    _FONTS["slot"]   = _make_font(z(9))
+    _FONTS["tiny"]   = _make_font(z(10))
 
 
-# ─────────────────────────────────────────────  layout constants
-WIN_W, WIN_H = 1080, 720
-MARGIN = 50
-PITCH_PX_W = WIN_W - 2 * MARGIN   # 980
-PITCH_PX_H = WIN_H - 2 * MARGIN   # 620 – extra headroom is used by HUD at the bottom
+# ─────────────────────────────────────────────  layout
+# Everything is laid out for the CURRENT window size by set_layout(), which is called at start and on every
+# resize. The pitch keeps its true proportions and is drawn at native resolution (no blurry scaling).
+WIN_W, WIN_H = 1280, 800
+UI = 1.0                 # scale of text and bars relative to the 1280x800 design size
+HUD_H = 72               # top bar: scoreboard, clock, status
+FOOT_H = 64              # bottom bar: match stats, shot chance, key hints
+PX0 = PY0 = 0            # top-left pixel of the pitch
+PITCH_PX_W = PITCH_PX_H = 1
 
-HUD_H = 52          # px reserved at the very top for score / match info
+
+def set_layout(w: int, h: int, L: float = 100.0, W: float = 60.0):
+    global WIN_W, WIN_H, UI, HUD_H, FOOT_H, PX0, PY0, PITCH_PX_W, PITCH_PX_H
+    WIN_W, WIN_H = max(480, int(w)), max(320, int(h))
+    UI = max(0.55, min(WIN_W / 1280, WIN_H / 800))
+    HUD_H, FOOT_H = int(72 * UI), int(64 * UI)
+    pad_x, pad_y = int(48 * UI), int(16 * UI)          # pad_x leaves room for the goals behind the goal lines
+    avail_w, avail_h = WIN_W - 2 * pad_x, WIN_H - HUD_H - FOOT_H - 2 * pad_y
+    PITCH_PX_W = int(max(50, min(avail_w, avail_h * L / W)))
+    PITCH_PX_H = int(PITCH_PX_W * W / L)
+    PX0 = (WIN_W - PITCH_PX_W) // 2
+    PY0 = HUD_H + pad_y + max(0, (avail_h - PITCH_PX_H) // 2)
+    _init_fonts(UI)
+
 
 # colours
 C_PITCH_DARK   = (34,  85, 34)
@@ -100,7 +125,9 @@ C_BALL         = (255, 255, 255)
 C_BALL_OUTLINE = (30,  30,  30)
 C_FLIGHT_PASS  = (255, 255, 255)
 C_FLIGHT_SHOT  = (255, 140,  40)
-C_HUD_BG       = (18,  18,  18)
+C_HUD_BG       = (18,  20,  24)
+C_PAGE_BG      = (12,  22,  16)     # around the pitch
+C_MUTED        = (150, 156, 165)
 C_HUD_TEXT     = (230, 230, 230)
 C_ANCHOR       = [(80, 140, 220, 100), (220, 80, 80, 100)]
 C_VISION       = (43, 108, 176, 28)
@@ -108,8 +135,9 @@ C_VISION_EDGE  = (43, 108, 176, 80)
 
 SLOT_COLOURS = {"D": (100, 200, 255), "M": (100, 255, 150), "F": (255, 160, 60)}
 
-FLASH_GOAL_FRAMES   = 35    # goal badge stays for 35 frames (~1.75s at 20fps)
+FLASH_GOAL_FRAMES   = 14    # goal / goal-kick badge stays for 14 frames
 FLASH_EVENT_FRAMES  = 25
+SHOT_HOLD_FRAMES    = 6     # shot replay: frames the ball rests where it ended up (it flies there at pass speed)
 GOAL_PAUSE_FRAMES   = 75   # 3-2-1 countdown: 25 frames per digit at 20fps = 3.75s
 
 
@@ -117,8 +145,8 @@ GOAL_PAUSE_FRAMES   = 75   # 3-2-1 countdown: 25 frames per digit at 20fps = 3.7
 
 def w2s(wx: float, wy: float, L: float = 100.0, W: float = 60.0):
     """World coords (m) → screen pixel (int, int). y flipped: higher y = higher on screen."""
-    sx = MARGIN + int(wx / L * PITCH_PX_W)
-    sy = HUD_H + MARGIN + int((1.0 - wy / W) * (PITCH_PX_H - HUD_H))
+    sx = PX0 + int(wx / L * PITCH_PX_W)
+    sy = PY0 + int((1.0 - wy / W) * PITCH_PX_H)
     return sx, sy
 
 
@@ -132,28 +160,26 @@ def w2r(metres: float, L: float = 100.0) -> int:
 def build_background(env: FootballEnv) -> pygame.Surface:
     L, W = env.L, env.W
     surf = pygame.Surface((WIN_W, WIN_H))
-
-    # HUD bar
-    surf.fill(C_HUD_BG, (0, 0, WIN_W, HUD_H))
+    surf.fill(C_PAGE_BG)
 
     # pitch stripes (every 10 m along x)
     n_stripes = int(L / 10)
     for i in range(n_stripes):
-        x0 = MARGIN + int(i / n_stripes * PITCH_PX_W)
-        x1 = MARGIN + int((i + 1) / n_stripes * PITCH_PX_W)
-        y0 = HUD_H + MARGIN
-        y1 = HUD_H + MARGIN + (PITCH_PX_H - HUD_H)
+        x0 = PX0 + int(i / n_stripes * PITCH_PX_W)
+        x1 = PX0 + int((i + 1) / n_stripes * PITCH_PX_W)
+        y0 = PY0
+        y1 = PY0 + PITCH_PX_H
         c = C_PITCH_DARK if i % 2 == 0 else C_PITCH_LIGHT
         pygame.draw.rect(surf, c, (x0, y0, x1 - x0, y1 - y0))
 
     # pitch border
-    bx = MARGIN; by = HUD_H + MARGIN
-    bw = PITCH_PX_W; bh = PITCH_PX_H - HUD_H
+    bx = PX0; by = PY0
+    bw = PITCH_PX_W; bh = PITCH_PX_H
     pygame.draw.rect(surf, C_WHITE, (bx, by, bw, bh), 2)
 
     # centre line
-    cx = MARGIN + PITCH_PX_W // 2
-    pygame.draw.line(surf, C_WHITE, (cx, HUD_H + MARGIN), (cx, HUD_H + MARGIN + bh), 1)
+    cx = PX0 + PITCH_PX_W // 2
+    pygame.draw.line(surf, C_WHITE, (cx, PY0), (cx, PY0 + bh), 1)
 
     # centre circle
     cy_world = W / 2
@@ -162,33 +188,55 @@ def build_background(env: FootballEnv) -> pygame.Surface:
     pygame.draw.circle(surf, C_WHITE, cc, w2r(9.15, L), 1)
     pygame.draw.circle(surf, C_WHITE, cc, w2r(0.6, L))   # centre spot
 
-    # goals (depth 3 m, width GOAL_W)
     gw = env.cfg.pitch.goal_width
-    goal_depth = 3.0
-    for (x_world, facing) in [(0.0, 1), (L, -1)]:
-        y0_w = W / 2 - gw / 2
-        y1_w = W / 2 + gw / 2
-        gx0 = w2s(x_world, y0_w, L, W)
-        gx1 = w2s(x_world, y1_w, L, W)
-        gx_back0 = w2s(x_world + facing * goal_depth, y0_w, L, W)
-        gx_back1 = w2s(x_world + facing * goal_depth, y1_w, L, W)
-        # goal box outline
-        pts = [gx0, gx_back0, gx_back1, gx1]
-        pygame.draw.lines(surf, C_GOAL, False, pts, 3)
+    px_y = lambda m: max(1, int(m / W * bh))      # world length (m) -> pixels along y
 
-    # shooting zone arcs (centered on each goal mouth, radius D_SHOOT_MAX)
-    shoot_r = env.cfg.mechanics.shoot_max
+    def box(x_goal, facing, depth, width, line=1):
+        """Rectangle of the given depth/width standing on a goal line (facing = +1 into the pitch from x=0)."""
+        (xa, ya), (xb, yb) = w2s(x_goal, W / 2 + width / 2, L, W), w2s(x_goal + facing * depth, W / 2 - width / 2, L, W)
+        pygame.draw.rect(surf, C_WHITE, (min(xa, xb), ya, abs(xb - xa), yb - ya), line)
+
+    pitch_rect = pygame.Rect(bx, by, bw, bh)
     arc_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    for (x_goal, start_ang, stop_ang) in [
-        (0.0,  -math.pi / 2, math.pi / 2),   # left goal — arc faces right
-        (L,     math.pi / 2, 3 * math.pi / 2),   # right goal — arc faces left
-    ]:
-        gcy = W / 2
-        cx_px, cy_px = w2s(x_goal, gcy, L, W)
-        r_px = w2r(shoot_r, L)
-        rect = pygame.Rect(cx_px - r_px, cy_px - r_px, r_px * 2, r_px * 2)
-        pygame.draw.arc(arc_surf, C_SHOOT_ARC, rect, start_ang, stop_ang, 1)
+    shoot_r = env.cfg.mechanics.shoot_max
+    for x_goal, facing in [(0.0, 1), (L, -1)]:
+        pen_d, pen_w = 16.5, min(gw + 33.0, W - 4.0)       # penalty area
+        box(x_goal, facing, pen_d, pen_w)
+        box(x_goal, facing, 5.5, min(gw + 11.0, W - 8.0))  # goal area
+        spot = w2s(x_goal + facing * 11.0, W / 2, L, W)
+        pygame.draw.circle(surf, C_WHITE, spot, 2)         # penalty spot
+        # penalty arc: the part of the 9.15 m circle around the spot that lies outside the penalty area
+        r = w2r(9.15, L)
+        half = math.acos((pen_d - 11.0) / 9.15)
+        mid = 0.0 if facing == 1 else math.pi
+        pygame.draw.arc(surf, C_WHITE, (spot[0] - r, spot[1] - r, 2 * r, 2 * r), mid - half, mid + half, 1)
+
+        # goal: posts and net stand OUTSIDE the pitch, behind the goal line
+        depth = 3.0
+        (fx, fy0), (_, fy1) = w2s(x_goal, W / 2 + gw / 2, L, W), w2s(x_goal, W / 2 - gw / 2, L, W)
+        bxp = w2s(x_goal - facing * depth, 0, L, W)[0]
+        net = pygame.Rect(min(fx, bxp), fy0, abs(bxp - fx), fy1 - fy0)
+        pygame.draw.rect(surf, (28, 60, 28), net)
+        for gx in range(net.left, net.right, 6):
+            pygame.draw.line(surf, (90, 110, 90), (gx, net.top), (gx, net.bottom), 1)
+        for gy in range(net.top, net.bottom, 6):
+            pygame.draw.line(surf, (90, 110, 90), (net.left, gy), (net.right, gy), 1)
+        pygame.draw.lines(surf, C_GOAL, False, [(fx, fy0), (bxp, fy0), (bxp, fy1), (fx, fy1)], 3)
+        pygame.draw.circle(surf, C_WHITE, (fx, fy0), 4)    # posts
+        pygame.draw.circle(surf, C_WHITE, (fx, fy1), 4)
+
+        # shooting zone (radius D_SHOOT_MAX around the goal centre), faint and clipped to the pitch
+        cxp, cyp = w2s(x_goal, W / 2, L, W)
+        rx, ry = w2r(shoot_r, L), px_y(shoot_r)
+        arc_surf.set_clip(pitch_rect)
+        pygame.draw.ellipse(arc_surf, C_SHOOT_ARC, (cxp - rx, cyp - ry, 2 * rx, 2 * ry), 1)
     surf.blit(arc_surf, (0, 0))
+
+    # corner arcs (1 m)
+    cr = w2r(1.0, L)
+    for (cxw, cyw, a0) in [(0, 0, 0.0), (L, 0, math.pi / 2), (L, W, math.pi), (0, W, 3 * math.pi / 2)]:
+        cpx, cpy = w2s(cxw, cyw, L, W)
+        pygame.draw.arc(surf, C_WHITE, (cpx - cr, cpy - cr, 2 * cr, 2 * cr), a0, a0 + math.pi / 2, 1)
 
     return surf
 
@@ -357,17 +405,16 @@ def draw_shot_indicator(screen: pygame.Surface, env: FootballEnv, font_small):
                          env.control(ht, hi),
                          env.cfg.mechanics.p_max,
                          env.cfg.mechanics.d0,
-                         env.cfg.mechanics.shot_block_scale)
-    bar_x = WIN_W - 185
-    bar_y = WIN_H - 38
-    bar_w = 140
-    bar_h = 14
+                         env.cfg.mechanics.shot_block_scale, sure_goal(env.cfg.mechanics))
+    bar_w, bar_h = int(170 * UI), int(12 * UI)
+    bar_x = WIN_W - bar_w - int(20 * UI)
+    bar_y = WIN_H - FOOT_H + int(30 * UI)
     colour = (60, 200, 60) if p > 0.5 else (220, 200, 0) if p > 0.25 else (200, 60, 60)
     pygame.draw.rect(screen, (40, 40, 40), (bar_x, bar_y, bar_w, bar_h))
     pygame.draw.rect(screen, colour, (bar_x, bar_y, int(bar_w * p), bar_h))
     pygame.draw.rect(screen, (150, 150, 150), (bar_x, bar_y, bar_w, bar_h), 1)
-    lbl = font_small.render(f"Shoot  {p:.0%}", True, C_WHITE)
-    screen.blit(lbl, (bar_x, bar_y - 16))
+    lbl = font_small.render(f"Shot chance  {p:.0%}", True, C_WHITE)
+    screen.blit(lbl, (bar_x, bar_y - lbl.get_height() - int(6 * UI)))
 
 
 def _clamp_color(r, g, b, a) -> tuple:
@@ -413,7 +460,7 @@ def draw_flashes(screen: pygame.Surface, flashes: list):
             # Simple linear fade-out from full opacity; pill sits just below HUD
             alpha   = int(255 * t / FLASH_GOAL_FRAMES)
             team_c  = C_TEAM[fl["team"]]
-            cy_pill = HUD_H + 30          # top of pitch, below HUD bar
+            cy_pill = PY0 + int(30 * UI)  # top of the pitch
             _pill(screen, WIN_W // 2, cy_pill,
                   f"GOAL  {fl['score'][0]}–{fl['score'][1]}", team_c, (10, 10, 10),
                   alpha, font_med, pad_x=18, pad_h=10)
@@ -440,6 +487,16 @@ def draw_flashes(screen: pygame.Surface, flashes: list):
 
         elif kind == "pass_ok":
             pygame.draw.circle(screen, (60, 220, 60), fl["pos"], 7, 2)
+
+        elif kind == "clear":
+            alpha = int(255 * t / FLASH_EVENT_FRAMES)
+            _pill(screen, fl["pos"][0], fl["pos"][1] - 22,
+                  "CLEARED", C_TEAM[fl["team"]], (240, 240, 240), alpha, font_med, pad_x=10, pad_h=8)
+
+        elif kind == "goal_kick":
+            alpha = int(255 * min(1.0, 2.0 * t / FLASH_GOAL_FRAMES))
+            _pill(screen, fl["pos"][0], fl["pos"][1] - 26,
+                  "GOAL KICK", C_TEAM[fl["team"]], (240, 240, 240), alpha, font_med, pad_x=10, pad_h=8)
 
     for fl in to_remove:
         flashes.remove(fl)
@@ -473,12 +530,58 @@ def draw_kickoff_overlay(screen: pygame.Surface, env: FootballEnv, frames_left: 
         screen.blit(ds, (cx - ds.get_width() // 2, cy - ds.get_height() // 2))
 
 
+def make_shot_anim(event: dict, env: FootballEnv, pre_pos) -> dict:
+    """Replay of a shot: from the shooter to inside the net (goal) or past the goal line wide of the post (miss)."""
+    team, idx = event["by"]
+    L, W, gw = env.L, env.W, env.cfg.pitch.goal_width
+    start = np.array(pre_pos[team][idx], float)
+    out = 1.0 if team == 0 else -1.0              # team 0 shoots at x = L, team 1 at x = 0
+    gx = L if team == 0 else 0.0
+    side = 1.0 if start[1] >= W / 2 else -1.0     # the ball stays on the shooter's side of the goal
+    if event["scored"]:
+        end = np.array([gx + out * 1.8, W / 2 + side * min(abs(start[1] - W / 2) * 0.3, gw / 2 - 1.5)])
+    else:
+        end = np.array([gx + out * 4.0, W / 2 + side * (gw / 2 + 4.0)])
+    fly = max(1, math.ceil(dist(start, end) / env.cfg.speeds["pass"]))   # same ball speed as in play, one step per frame
+    return {"start": start, "end": end, "scored": bool(event["scored"]), "team": team,
+            "pre_pos": pre_pos, "fly": fly, "frames": fly + SHOT_HOLD_FRAMES}
+
+
+def draw_shot_anim(screen: pygame.Surface, env: FootballEnv, an: dict):
+    """Draw the ball of a shot replay and its label. Ticks the animation."""
+    an["frames"] -= 1
+    k = min(1.0, (an["fly"] + SHOT_HOLD_FRAMES - an["frames"]) / an["fly"])
+    pos = an["start"] + k * (an["end"] - an["start"])
+    s_px, b_px = w2s(*an["start"], env.L, env.W), w2s(*pos, env.L, env.W)
+    draw_dashed_line(screen, C_FLIGHT_SHOT, s_px, b_px, dash=7, gap=5)
+    r = w2r(0.9, env.L)
+    pygame.draw.circle(screen, C_BALL, b_px, r)
+    pygame.draw.circle(screen, C_BALL_OUTLINE, b_px, r, 1)
+    if k >= 1.0:
+        e_px = w2s(*an["end"], env.L, env.W)
+        tx = min(max(e_px[0], 90), WIN_W - 90)
+        if an["scored"]:
+            _pill(screen, tx, e_px[1] - 30, "GOAL!", C_TEAM[an["team"]], (255, 255, 255), 255, _FONTS["med"],
+                  pad_x=12, pad_h=8)
+        else:
+            _pill(screen, tx, e_px[1] - 30, "MISS - OUT", (40, 40, 40), (255, 200, 60), 255, _FONTS["med"],
+                  pad_x=12, pad_h=8)
+
+
 def make_flash(event: dict, env: FootballEnv) -> dict | None:
     kind = event.get("type")
     if kind == "goal":
         return {"kind": "goal", "team": event["team"],
                 "score": (env.score[0], env.score[1]),
                 "frames": FLASH_GOAL_FRAMES}
+    if kind == "goal_kick":
+        tt, ti = event["by"]
+        px, py = w2s(*env.pos[tt][ti], env.L, env.W)
+        return {"kind": "goal_kick", "team": tt, "pos": (px, py), "frames": FLASH_GOAL_FRAMES}
+    if kind == "clear":
+        tt, ti = event["by"]
+        px, py = w2s(*env.pos[tt][ti], env.L, env.W)
+        return {"kind": "clear", "team": tt, "pos": (px, py), "frames": FLASH_EVENT_FRAMES}
     if kind == "tackle" and event.get("success"):
         tt, ti = event["by"]
         px, py = w2s(*env.pos[tt][ti], env.L, env.W)
@@ -496,51 +599,121 @@ def make_flash(event: dict, env: FootballEnv) -> dict | None:
     return None
 
 
-def draw_hud(screen: pygame.Surface, env: FootballEnv, fps: int,
-             paused: bool, show_vision: bool, show_anchors: bool,
-             show_ghosts: bool, font_hud, font_small):
+def _text(screen, font, text, colour, x, y, anchor="l"):
+    """Blit text with its left / centre / right edge at x. Returns the rect it covers."""
+    surf = font.render(text, True, colour)
+    w = surf.get_width()
+    x0 = x if anchor == "l" else x - w // 2 if anchor == "c" else x - w
+    screen.blit(surf, (x0, y))
+    return pygame.Rect(x0, y, w, surf.get_height())
+
+
+def _tag(screen, font, text, fg, bg, x, y, anchor="l"):
+    """Small filled label (status chip). Returns its rect."""
+    surf = font.render(text, True, fg)
+    pw, ph = surf.get_width() + int(16 * UI), surf.get_height() + int(8 * UI)
+    x0 = x if anchor == "l" else x - pw // 2 if anchor == "c" else x - pw
+    pygame.draw.rect(screen, bg, (x0, y, pw, ph), border_radius=ph // 2)
+    screen.blit(surf, (x0 + int(8 * UI), y + int(4 * UI)))
+    return pygame.Rect(x0, y, pw, ph)
+
+
+def draw_hud(screen: pygame.Surface, env: FootballEnv, ui: dict):
+    """Top bar. Left: clock and status. Centre: scoreboard (the team with the ball is underlined).
+    Right: seed and speed. A thin bar along the bottom shows match progress with a half-time tick."""
+    u = lambda n: int(n * UI)
     pygame.draw.rect(screen, C_HUD_BG, (0, 0, WIN_W, HUD_H))
-    pygame.draw.line(screen, (60, 60, 60), (0, HUD_H), (WIN_W, HUD_H), 1)
+    f_score, f_team, f_small = _FONTS["hud"], _FONTS["team"], _FONTS["small"]
+    cx = WIN_W // 2
+    names = ["BLUE", "RED"]
 
-    s0, s1 = env.score
-    score_str = f"{s0}  –  {s1}"
-    score_surf = font_hud.render(score_str, True, C_WHITE)
-    screen.blit(score_surf, (WIN_W // 2 - score_surf.get_width() // 2, 6))
+    # scoreboard
+    sc = f_score.render(f"{env.score[0]}  -  {env.score[1]}", True, C_WHITE)
+    sy = u(10)
+    screen.blit(sc, (cx - sc.get_width() // 2, sy))
+    gap = sc.get_width() // 2 + u(22)
+    for team, sign in ((0, -1), (1, 1)):
+        r = _text(screen, f_team, names[team], C_WHITE, cx + sign * gap, sy + u(2), "r" if sign < 0 else "l")
+        chip_x = r.left - u(16) if sign < 0 else r.right + u(16)
+        if team == 0:
+            pygame.draw.polygon(screen, C_TEAM[0], _tri_pts(chip_x, r.centery + u(1), u(8)))
+        else:
+            pygame.draw.circle(screen, C_TEAM[1], (chip_x, r.centery), u(7))
+        sub = f"{env.formation[team]}  {env.style[team]}"
+        if team == 1 and env.sigma_idx is not None:
+            sub += f"  playmaker {env.sigma_idx + 1}"
+        _text(screen, f_small, sub, C_MUTED, cx + sign * gap, r.bottom + u(6), "r" if sign < 0 else "l")
+        if env.holder is not None and env.holder[0] == team:      # possession underline
+            pygame.draw.rect(screen, C_TEAM[team], (r.left, r.bottom + u(2), r.width, max(2, u(3))))
 
-    # left: formations
-    our_f = env.formation[0]
-    opp_f = env.formation[1]
-    f_str = f"Ours: {our_f}   Opp: {opp_f}"
-    if env.sigma_idx is not None:
-        f_str += f"   ★PM:p{env.sigma_idx + 1}"
-    fl = font_small.render(f_str, True, (180, 180, 180))
-    screen.blit(fl, (8, 8))
-
-    # right: step + fps + toggles
-    t_frac = env.t / env.T
-    r_str = f"t {env.t}/{env.T}  {t_frac:.0%}  {fps}fps"
-    flags = []
-    if paused:       flags.append("PAUSED")
-    if show_vision:  flags.append("[V]vision")
-    if show_anchors: flags.append("[A]anchors")
-    if show_ghosts:  flags.append("[F]ghosts")
-    if flags:        r_str += "  " + "  ".join(flags)
-    rs = font_small.render(r_str, True, (160, 160, 160))
-    screen.blit(rs, (WIN_W - rs.get_width() - 8, 8))
-
-    # possession dot
-    poss_colours = [C_TEAM[0], C_TEAM[1], (140, 140, 140)]
-    if env.holder is not None:
-        poss_c = poss_colours[env.holder[0]]
+    # left: clock + status
+    half = "1st half" if env.t < env.cfg.time.T_half else "2nd half"
+    r = _text(screen, f_team, f"{env.t} / {env.T}", C_WHITE, u(18), u(12))
+    _text(screen, f_small, "full time" if env.done else half, C_MUTED, u(18), r.bottom + u(6))
+    if env.done:
+        _tag(screen, f_small, "FULL TIME", (20, 20, 20), (235, 235, 235), r.right + u(14), u(10))
+    elif ui["paused"]:
+        _tag(screen, f_small, "PAUSED", (20, 20, 20), (240, 190, 60), r.right + u(14), u(10))
     else:
-        poss_c = poss_colours[2]
-    pygame.draw.circle(screen, poss_c, (WIN_W // 2 - score_surf.get_width() // 2 - 18, 20), 7)
+        _tag(screen, f_small, "LIVE", C_WHITE, (190, 50, 50), r.right + u(14), u(10))
 
-    # step bar
-    bar_y = HUD_H - 4
-    bar_w = int((env.t / env.T) * WIN_W)
-    pygame.draw.rect(screen, (40, 40, 40), (0, bar_y, WIN_W, 4))
-    pygame.draw.rect(screen, (80, 140, 220), (0, bar_y, bar_w, 4))
+    # right: seed, speed, overlays that are on
+    r = _text(screen, f_team, f"seed {ui['seed']}", C_WHITE, WIN_W - u(18), u(12), "r")
+    on = [n for n, k in (("vision", "show_vision"), ("anchors", "show_anchors"), ("formations", "show_ghosts")) if ui[k]]
+    _text(screen, f_small, f"{ui['fps']} fps" + ("   showing: " + ", ".join(on) if on else ""), C_MUTED,
+          WIN_W - u(18), r.bottom + u(6), "r")
+
+    # progress bar with half-time tick
+    bar_h = max(3, u(4))
+    pygame.draw.rect(screen, (44, 48, 56), (0, HUD_H - bar_h, WIN_W, bar_h))
+    pygame.draw.rect(screen, (90, 150, 230), (0, HUD_H - bar_h, int(env.t / env.T * WIN_W), bar_h))
+    hx = int(env.cfg.time.T_half / env.T * WIN_W)
+    pygame.draw.line(screen, (200, 200, 200), (hx, HUD_H - bar_h - u(3)), (hx, HUD_H), 1)
+
+
+def draw_footer(screen: pygame.Surface, env: FootballEnv):
+    """Bottom bar. Top row: live match stats (blue value | label | red value). Bottom row: key hints."""
+    u = lambda n: int(n * UI)
+    y0 = WIN_H - FOOT_H
+    pygame.draw.rect(screen, C_HUD_BG, (0, y0, WIN_W, FOOT_H))
+    pygame.draw.line(screen, (44, 48, 56), (0, y0), (WIN_W, y0), 1)
+    f_small, f_team = _FONTS["small"], _FONTS["team"]
+    st = env.stats
+    poss = st["possession_steps"]
+    tot = max(1, poss[0] + poss[1])
+    pct = lambda a, b: f"{100 * a / b:.0f}%" if b else "-"
+    rows = [("possession", f"{100 * poss[0] / tot:.0f}%", f"{100 * poss[1] / tot:.0f}%"),
+            ("shots", str(st["shots"][0]), str(st["shots"][1])),
+            ("passes", str(st["passes"][0]), str(st["passes"][1])),
+            ("pass accuracy", pct(st["passes_completed"][0], st["passes"][0]), pct(st["passes_completed"][1], st["passes"][1])),
+            ("tackles won", str(st["tackles_won"][0]), str(st["tackles_won"][1]))]
+    x = u(18)
+    y = y0 + u(10)
+    for label, a, b in rows:
+        ra = _text(screen, f_team, a, C_TEAM[0], x, y)
+        rl = _text(screen, f_small, label, C_MUTED, ra.right + u(8), y + u(2))
+        rb = _text(screen, f_team, b, (225, 90, 90), rl.right + u(8), y)
+        x = rb.right + u(30)
+    keys = ("Space pause  Right step  Up/Down speed  R new match  Shift+R replay  Z/X blue/red style  "
+            "N/M blue/red formation  V vision  A anchors  F formations  1-5 highlight  Q quit")
+    _text(screen, f_small, keys, (110, 116, 126), u(18), WIN_H - f_small.get_height() - u(10))
+
+
+def draw_full_time(screen: pygame.Surface, env: FootballEnv):
+    """Result card in the middle of the pitch once the match is over."""
+    u = lambda n: int(n * UI)
+    a, b = env.score
+    head = "DRAW" if a == b else ("BLUE WINS" if a > b else "RED WINS")
+    col = (235, 235, 235) if a == b else C_TEAM[0 if a > b else 1]
+    cx, cy = w2s(env.L / 2, env.W / 2, env.L, env.W)
+    w, h = u(360), u(150)
+    card = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(card, (14, 16, 20, 225), (0, 0, w, h), border_radius=u(14))
+    pygame.draw.rect(card, (*col, 255), (0, 0, w, h), width=2, border_radius=u(14))
+    screen.blit(card, (cx - w // 2, cy - h // 2))
+    _text(screen, _FONTS["med"], "FULL TIME  -  " + head, col, cx, cy - h // 2 + u(16), "c")
+    _text(screen, _FONTS["big"], f"{a} - {b}", C_WHITE, cx, cy - u(26), "c")
+    _text(screen, _FONTS["small"], "press R for a new match", C_MUTED, cx, cy + h // 2 - u(28), "c")
 
 
 # ─────────────────────────────────────────────  main
@@ -554,6 +727,12 @@ def main():
     ap.add_argument("--sigma",    type=int,   default=0)
     ap.add_argument("--opp-mode", default="NONE")
     ap.add_argument("--seed",     type=int,   default=0)
+    styles = list(load_config().styles.presets.to_dict())
+    ap.add_argument("--style",     choices=styles, default=None, help="play style of the blue team (default: config)")
+    ap.add_argument("--opp-style", choices=styles, default=None, help="play style of the red team (default: config)")
+    forms = list(load_config().formations.anchors.to_dict())
+    ap.add_argument("--formation",     choices=forms, default=None, help="formation of the blue team (default: config)")
+    ap.add_argument("--opp-formation", choices=forms, default=None, help="formation of the red team (default: config)")
     ap.add_argument("--no-anchors", action="store_true")
     args = ap.parse_args()
 
@@ -562,17 +741,16 @@ def main():
         overrides["vision.radius"] = args.radius
     cfg  = load_config(overrides=overrides)
     env  = FootballEnv(cfg, scripted_ours=(args.mode == "scripted"))
+    style = [args.style or cfg.styles.ours, args.opp_style or cfg.styles.opponent]   # blue, red (Z / X change them)
+    formation = [args.formation or cfg.formations.ours, args.opp_formation or cfg.formations.opponent]   # N / M
     ag   = RandomAgent(args.seed) if args.mode == "random" else None
 
     pygame.init()
     _ft.init()   # initialise the C-level freetype engine
-    pygame.display.set_caption("Football Agent — Top-down 2D")
-    screen = pygame.display.set_mode((WIN_W, WIN_H))
-    _init_fonts()  # after set_mode so convert_alpha() works in render()
+    pygame.display.set_caption(f"Football Agent — Top-down 2D (seed {args.seed})")
+    screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
+    set_layout(WIN_W, WIN_H, env.L, env.W)   # after set_mode so convert_alpha() works when fonts render
     clock  = pygame.time.Clock()
-
-    font_hud   = _FONTS["hud"]
-    font_small = _FONTS["small"]
 
     fps                  = args.fps
     paused               = False
@@ -585,12 +763,15 @@ def main():
     goal_pause_remaining = 0     # frames left in pre-kickoff freeze (countdown)
     kicking_off_team     = 0     # team taking the next kickoff
     match_over_flashed   = False  # prevent repeated end-of-match flash
+    shot_anim            = None   # active shot replay (sim is frozen while it plays)
 
     def do_reset(s):
-        nonlocal flashes, goal_pause_remaining, kicking_off_team, match_over_flashed
+        nonlocal flashes, goal_pause_remaining, kicking_off_team, match_over_flashed, shot_anim
         flashes = []
+        shot_anim = None
         match_over_flashed = False
-        obs, _ = env.reset(seed=s, sigma=args.sigma)
+        obs, _ = env.reset(seed=s, sigma=args.sigma, our_style=style[0], opp_style=style[1],
+                           our_formation=formation[0], opp_formation=formation[1])
         # Start with a 3-2-1 countdown before the first kick
         goal_pause_remaining = GOAL_PAUSE_FRAMES
         kicking_off_team     = env.holder[0] if env.holder else 0
@@ -624,26 +805,42 @@ def main():
                     show_anchors = not show_anchors
                 elif k == pygame.K_f:
                     show_ghosts = not show_ghosts
-                elif k == pygame.K_r:
+                elif k == pygame.K_r:                      # R = new match with a random seed; Shift+R = replay this one
+                    if not (event.mod & pygame.KMOD_SHIFT):
+                        seed = int.from_bytes(os.urandom(2), "big")   # 0..65535, shown in the top bar
                     obs = do_reset(seed)
                     bg  = build_background(env)
                     paused = False
+                    pygame.display.set_caption(f"Football Agent — Top-down 2D (seed {seed})")
+                elif k in (pygame.K_z, pygame.K_x):        # Z / X = next play style for blue / red, mid-match
+                    team = 0 if k == pygame.K_z else 1
+                    style[team] = styles[(styles.index(style[team]) + 1) % len(styles)]
+                    env.set_style(team, style[team])
+                elif k in (pygame.K_n, pygame.K_m):        # N / M = next formation for blue / red, mid-match
+                    team = 0 if k == pygame.K_n else 1     # (from the one on the pitch: the team may have switched itself)
+                    formation[team] = forms[(forms.index(env.formation[team]) + 1) % len(forms)]
+                    env.set_formation(team, formation[team])
                 elif k in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
                     idx = k - pygame.K_1
                     highlight = -1 if highlight == idx else idx
 
         # ── advance simulation ──────────────────────────────────────
         # Count down the pre-kickoff freeze (sim paused while this is > 0)
-        if goal_pause_remaining > 0 and not paused:
+        if shot_anim is not None and shot_anim["frames"] <= 0:
+            shot_anim = None
+        if goal_pause_remaining > 0 and not paused and shot_anim is None:
             goal_pause_remaining -= 1
 
-        should_step = (not paused and not env.done and goal_pause_remaining == 0) or step_once
+        should_step = ((not paused and not env.done and goal_pause_remaining == 0) or step_once) and shot_anim is None
         step_once = False
 
         if should_step and not env.done:
             actions = ag.act(obs) if ag else None
+            pre_pos = env.pos.copy()
             obs, _, done, info = env.step(actions)
             for ev in info["events"]:
+                if ev.get("type") == "shot":
+                    shot_anim = make_shot_anim(ev, env, pre_pos)
                 fl = make_flash(ev, env)
                 if fl:
                     flashes.append(fl)
@@ -651,15 +848,12 @@ def main():
                         goal_pause_remaining = GOAL_PAUSE_FRAMES
                         kicking_off_team     = 1 - fl["team"]  # opposite team kicks off
 
-        # End-of-match: show final score once, then stay static
-        if env.done and not match_over_flashed:
-            match_over_flashed = True
-            winner = 0 if env.score[0] >= env.score[1] else 1
-            flashes.append({"kind": "goal", "team": winner,
-                            "score": (env.score[0], env.score[1]),
-                            "frames": FLASH_GOAL_FRAMES})
-
         # ── draw ────────────────────────────────────────────────────
+        screen = pygame.display.get_surface()            # the window's surface (a resize may replace it)
+        if screen.get_size() != (WIN_W, WIN_H):          # window resized: lay everything out again, sharp
+            set_layout(*screen.get_size(), env.L, env.W)
+            bg = build_background(env)
+            flashes = []                                 # their pixel positions are stale
         screen.blit(bg, (0, 0))
 
         if show_anchors:
@@ -669,17 +863,28 @@ def main():
         if show_vision:
             draw_vision(screen, env)
 
-        if goal_pause_remaining == 0:
-            draw_flight(screen, env)   # no flight possible during freeze
-        draw_players(screen, env, highlight=highlight)
-        draw_ball(screen, env)
-        if goal_pause_remaining == 0:
-            draw_shot_indicator(screen, env, font_small)
-        draw_flashes(screen, flashes)
-        if goal_pause_remaining > 0:
-            draw_kickoff_overlay(screen, env, goal_pause_remaining, kicking_off_team)
-        draw_hud(screen, env, fps, paused, show_vision, show_anchors, show_ghosts,
-                 font_hud, font_small)
+        if shot_anim is not None:
+            # replay the shot over the positions the players had when it was taken
+            live_pos, live_holder = env.pos, env.holder
+            env.pos, env.holder = shot_anim["pre_pos"], None
+            draw_players(screen, env, highlight=highlight)
+            env.pos, env.holder = live_pos, live_holder
+            draw_shot_anim(screen, env, shot_anim)
+        else:
+            if goal_pause_remaining == 0:
+                draw_flight(screen, env)   # no flight possible during freeze
+            draw_players(screen, env, highlight=highlight)
+            draw_ball(screen, env)
+            draw_flashes(screen, flashes)
+            if goal_pause_remaining > 0:
+                draw_kickoff_overlay(screen, env, goal_pause_remaining, kicking_off_team)
+        draw_footer(screen, env)
+        if shot_anim is None and goal_pause_remaining == 0:
+            draw_shot_indicator(screen, env, _FONTS["small"])
+        draw_hud(screen, env, dict(fps=fps, paused=paused, seed=seed, show_vision=show_vision,
+                                   show_anchors=show_anchors, show_ghosts=show_ghosts))
+        if env.done and shot_anim is None:
+            draw_full_time(screen, env)
 
         clock.tick(fps)
         pygame.display.flip()

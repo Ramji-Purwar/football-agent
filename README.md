@@ -67,6 +67,7 @@ while not done:
 
 - `FootballEnv(cfg, scripted_ours=True)` drives OUR side with the scripted team too (heuristic vs heuristic, used by Phase 0).
 - `info` carries the hidden truth for oracles and probes: `info["g"]` (opponent formation), `info["sigma"]`, `info["switch"]`.
+- Play styles: `env.reset(our_style=..., opp_style=...)` with `"normal"`, `"aggressive"` or `"defensive"` (defaults in `styles` in the config; `info["styles"]` reports them). See `docs/opponent.md`, Section 8 (the whole document has annotated pictures of how the scripted team plays).
 - `env.event_log` and `env.stats` hold passes, tackles, shots, goals, switches, shadow counts. Compute metrics from them.
 - Call `env.set_shaping_weight(lambda_t)` from the trainer to anneal the shaping reward.
 

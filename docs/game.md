@@ -163,6 +163,7 @@ Notes:
 - `PASS_k` where `k=0..3` maps to the 4 teammates in ascending player index order (self excluded).
 - Invalid actions are masked: the policy cannot select them, but if the raw integer arrives, the env replaces it with `STAY`.
 - `MOVE_TO` (macro used by scripted controllers) is **not** in the learner's indexed action set.
+- `CLEAR` (macro used by scripted controllers, also not in the learner's set) is a clearance: the carrier kicks the ball up to `mechanics.clear.dist` = 40 m toward a point (default: straight upfield), with an aiming error of `mechanics.clear.spread` = 0.2 rad. The ball goes over everyone, so it cannot be intercepted or cut out in flight. It lands loose and whoever reaches it first picks it up.
 
 ---
 
@@ -199,10 +200,12 @@ Notes:
 
 | Parameter | Value |
 |---|---|
-| `V_DRIBBLE` | 0.9 m/step |
+| `V_DRIBBLE` | 0.75 m/step |
 | `V_PLAYER` | 1.0 m/step |
 
 Carrier moves at `V_DRIBBLE` (slower than free movement `V_PLAYER`) while holding the ball.
+
+**Cut-out in flight** (`mechanics.flight_cut`): on every step of a pass, an opponent who is not frozen and stands within `radius` m of the stretch the ball covers that step takes the ball, even if he was not picked as the interceptor at the kick. The first `free` m of the pass are exempt. `radius: 0` turns it off (interception is then decided only at the kick).
 
 ### 8.4 Tackling
 
@@ -215,8 +218,13 @@ Carrier moves at `V_DRIBBLE` (slower than free movement `V_PLAYER`) while holdin
 - Success probability: `p_win = c_defender / (c_defender + c_carrier)`.
 - Success: defender takes possession. Failure: defender is frozen for `T_TACKLE_RECOVER` steps.
 - Multiple tackle attempts in one step are resolved in seeded random order until one succeeds.
+- **Steal chain limit:** at most `max_steal_chain = 2` successful tackles in a row (A takes from B, B takes back). After that `TACKLE` is masked out for both teams until the ball is passed, shot or picked up loose, or until `steal_lock = 15` steps pass. This stops two players trading the ball on the spot.
 
 ### 8.5 Shooting
+
+**Sure goal** (`mechanics.sure_goal`): a shot taken from inside the goal area (the small box: within `depth` m of the goal line and `half_width` m either side of the goal centre) always scores, whatever the distance, defenders or control rating. There is no goalkeeper. `enabled: false` uses the normal formula everywhere.
+
+**Missed shot = goal kick** (`mechanics.goal_kick`): the defending player nearest to his own goal is placed on the goal-kick spot (`x` m in front of his goal centre) with the ball, a `goal_kick` event is logged, and nobody may tackle him for `protect` steps. With `clear_box: true`, no player of the other team may be inside the kicker's penalty box (`box`: 16.5 m deep, 22.5 m either side of the goal centre) when the kick is taken: those inside are placed on the nearest edge of the box, and none can enter until the kicker plays the ball or carries it out of the box. With `enabled: false` the ball is left loose near the goal line as before.
 
 | Parameter | Value |
 |---|---|
@@ -425,7 +433,7 @@ Run these before any training. All must pass.
 | E. Formation win matrix | Run all 5×5 formation pairs with heuristic, store matrix |
 | F. Random policy loses | Random policy clearly loses to scripted opponent |
 
-If checks B–C fail, tune constants before any training. See `opponent.md` Section 13 for calibration order.
+If checks B–C fail, tune constants before any training. See `opponent.md` Section 14 for calibration order.
 
 ---
 
@@ -448,7 +456,7 @@ All values from `configs/default.yaml` at project head:
 ```yaml
 pitch:   {length: 100.0, width: 60.0, goal_width: 12.0}
 time:    {T: 1200, T_half: 600}
-speeds:  {player: 1.0, dribble: 0.9, pass: 3.0}
+speeds:  {player: 1.0, dribble: 0.75, pass: 3.0}
 vision:  {radius: 25.0}
 actions: {n_directions: 8}
 

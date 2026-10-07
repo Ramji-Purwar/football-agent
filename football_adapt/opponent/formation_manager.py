@@ -1,4 +1,4 @@
-"""FormationManager: decides the current formation g_t of the scripted team (opponent.md, Section 4).
+"""FormationManager: decides the current formation g_t of the scripted team (opponent.md, Section 9).
 
 Modes: NONE | SCHEDULED | RANDOM | SCORE_REACTIVE. A minimum dwell time DWELL_MIN is respected between switches.
 The manager does not move players. It only says which formation is active. Players then WALK to the new

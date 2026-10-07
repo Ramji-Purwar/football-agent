@@ -15,6 +15,10 @@ class Kind(Enum):
     TACKLE = auto()
     SHADOW = auto()        # arg = opponent index 0..4
     MOVE_TO = auto()       # macro for scripted controllers: arg = point in TEAM frame (not in the learner's set)
+    THROUGH = auto()       # macro for scripted controllers: through ball. arg = [teammate index 0..3, x, y] with the
+                           # point in TEAM frame; the ball is played to that point for the teammate to run onto
+    CLEAR = auto()         # macro for scripted controllers: clearance. arg = point in TEAM frame to aim at (None =
+                           # straight upfield); the ball flies up to mechanics.clear.dist m and lands loose
 
 
 @dataclass(frozen=True)
@@ -64,7 +68,7 @@ class ActionSpace:
 
     def index_of(self, action: Action):
         """Index in the learner's action set, or None for macros not in it (MOVE_TO)."""
-        if action.kind == Kind.MOVE_TO:
+        if action.kind in (Kind.MOVE_TO, Kind.THROUGH, Kind.CLEAR):
             return None
         return self._index.get((action.kind, action.arg))
 

@@ -1,19 +1,26 @@
 # ======================================================================
 # default.yaml
 # PLACEHOLDER VALUES. They exist only so the code runs. Every number here
-# must be calibrated in Phase 0 (see opponent.md, Section 13) and then frozen.
+# must be calibrated in Phase 0 (see opponent.md, Section 14) and then frozen.
 # Override any value from code: load_config(overrides={"vision.radius": 15.0})
 # ======================================================================
 
 pitch:   {length: 100.0, width: 60.0, goal_width: 12.0}
 time:    {T: 1200, T_half: 600}
-speeds:  {player: 1.0, dribble: 0.9, pass: 3.0}
+speeds:  {player: 1.0, dribble: 0.75, pass: 3.0}   # dribble = speed of the player carrying the ball
 vision:  {radius: 25.0}               # normal players. The playmaker uses infinity
 actions: {n_directions: 8}
 
 mechanics:
   tackle_dist: 2.0
   tackle_recover: 3
+  max_steal_chain: 2                  # at most this many tackle steals in a row ...
+  flight_cut: {radius: 1.5, free: 3.0}   # an opponent within radius of the ball's path takes the pass (not in its first `free` m). 0 = off
+  # A missed shot restarts from the defending team's goal-kick spot. clear_box: the other team must be outside the
+  # penalty box (depth x 2*half_width, on the goal line) when it is taken, and stays out until the ball is played or leaves it.
+  goal_kick: {enabled: true, x: 6.0, protect: 10, clear_box: true, box: {depth: 16.5, half_width: 22.5}}
+  clear: {dist: 40.0, spread: 0.2}    # clearance: a long ball upfield to nobody, at most dist m, aiming error spread (rad)
+  steal_lock: 15                      # ... then no tackles for this many steps (or until the ball is passed/shot/picked up)
   pickup: 1.5
   intercept_margin: 0.5
   shadow_dist: 4.0
@@ -22,6 +29,7 @@ mechanics:
   d0: 30.0
   shot_block_scale: 4.0
   shot_miss_spread: 6.0
+  sure_goal: {enabled: true, depth: 5.5, half_width: 11.5}   # a shot from inside the goal area (small box) always scores
   s_pass: 0.15
 
 control:   {c_min: 0.5, l_ctrl: 20.0}
@@ -48,9 +56,53 @@ formations:
     "1-3-1": [[0.25, 0.50], [0.50, 0.20], [0.50, 0.50], [0.50, 0.80], [0.75, 0.50]]
     "1-2-2": [[0.25, 0.50], [0.50, 0.30], [0.50, 0.70], [0.75, 0.30], [0.75, 0.70]]
     "3-1-1": [[0.25, 0.20], [0.25, 0.50], [0.25, 0.80], [0.50, 0.50], [0.75, 0.50]]
+  # Every formation has an attacking and a defending shape. The anchors slide between them with possession:
+  # each line (D/M/F) goes to its own depth x, and the width is scaled by y_scale around the centre line.
+  # rate = phase change per step (0.05 = 20 steps from base to a full shape). enabled: false = static anchors.
+  phases:
+    enabled: true
+    rate: 0.05
+    attack: {x: {D: 0.42, M: 0.76, F: 0.85}, y_scale: 1.15}
+    defend: {x: {D: 0.15, M: 0.30, F: 0.50}, y_scale: 0.80}
+
+# Play style of each team: how it plays, on top of its formation. A preset is a partial copy of the config that is
+# merged over it for that team only. It may set `opponent.*` (behaviour) and `formations.phases.*` (shape), nothing else.
+styles:
+  ours: normal                        # used for our shape, and for our behaviour when our team is scripted
+  opponent: normal
+  presets:
+    normal: {}                        # exactly the values written in this file
+    # High line and a press that cuts passing lanes: the nearest player goes to the ball, the others stand in the
+    # middle between the carrier and the players he could pass to. Numbers forward, riskier passes.
+    aggressive:
+      formations:
+        phases:
+          attack: {x: {D: 0.50, M: 0.80, F: 0.88}, y_scale: 1.20}
+          defend: {x: {D: 0.25, M: 0.42, F: 0.62}, y_scale: 0.90}
+      opponent:
+        zone:    {r_zone: 15.0, engage: 18.0, double_dist: 12.0}
+        lanes:   {enabled: true}
+        attack:  {w_fwd: 2.4, pass_min: 0.25, safe_slack: 1.2, lane_margin: 1.2}
+        support: {adv: 8.0, def: 4.0}
+        run:     {lead: 13.0, r_run: 22.0}
+        moves:
+          through: {space: 6.5}
+    # Deep, narrow block that keeps players back even with the ball and drops quickly. It breaks with long balls
+    # to the forward, and does not keep the ball for long: after a while it forces the play (patience).
+    defensive:
+      formations:
+        phases:
+          rate: 0.08
+          attack: {x: {D: 0.25, M: 0.50, F: 0.78}, y_scale: 1.05}
+          defend: {x: {D: 0.13, M: 0.26, F: 0.50}, y_scale: 0.70}
+      opponent:
+        roles:    {d_max_pass: 60.0}
+        patience: {enabled: true}
+        moves:
+          counter: {steps: 25, lead_mult: 1.8, fwd_mult: 1.8}
 
 opponent:
-  zone:   {r_zone: 12.0, omega: 0.4, eps_arrive: 1.0, transition_max: 60}
+  zone:   {r_zone: 12.0, engage: 8.0, double_dist: 10.0, omega: 0.4, eps_arrive: 1.0, transition_max: 60}
   switching:
     mode: NONE                        # NONE | SCHEDULED | RANDOM | SCORE_REACTIVE
     dwell_min: 150
@@ -59,7 +111,39 @@ opponent:
     score_reactive: {check_interval: 50, trail_thresh: 1, lead_thresh: 1,
                      f_att: "1-2-2", f_def: "3-1-1"}
   attack:  {shoot_min: 0.3, w_fwd: 2.0, w_open: 0.5, w_dist: 0.3, pass_min: 0.3,
-            d_danger: 6.0, hub_bonus: 0.3, open_max: 15.0}
-  support: {adv: 8.0, mid: 6.0, def: 3.0, r_support: 10.0}
+            d_danger: 6.0, hub_bonus: 0.3, open_max: 15.0, lane_margin: 1.5, safe_slack: 1.5, shoot_close: 14.0, shoot_free: 7.0, max_pass: 60.0, fwd_cap: 1.0}
+  support: {adv: 4.0, mid: 6.0, def: 1.0, r_support: 10.0,
+            offer_dist: 10.0, offer_max: 30.0, offer_sep: 8.0, offer_space: 6.0}   # midfielders offer a back pass this far behind/beside the carrier
+  block:   {push: 0.0, drop: 0.0, rate: 0.5}   # team-wide x shift: + when we have the ball, - when they do. 0/0 = off
+  run:     {enabled: true, lead: 10.0, r_run: 18.0, dy: 8.0, goal_gap: 4.0}   # forward runs ahead of the ball
+  width:   {attack: 0.0, defend: 0.0, rate: 0.01, slide: 3.0, slide_rate: 0.3}   # y stretch / compaction, ball-side slide
+  cover:   {enabled: true, dist: 5.0, max_dev: 4.0}   # second defender sits goal-side of the presser
+  roles:   {push_scale: {D: 0.6, M: 1.0, F: 1.0}, drop_scale: {D: 1.0, M: 1.0, F: 0.5},
+            d_dribble_max_x: 0.6, carry_bias: {D: 0.8, M: 0.8, F: 0.0}, d_max_pass: 45.0, d_shoot_extra: 0.2, pass_bias: {D: -0.1, M: 0.0, F: 0.1}}
+  moves:                               # football patterns. steps: 0 / enabled: false / dist: 0 turns one off
+    through:       {enabled: true, lead: 8.0, space: 8.0, bonus: 0.1, cut_margin: 0.5}   # pass into space ahead of a runner
+    pass_move:     {steps: 10, run: 12.0, one_two_bonus: 0.4}          # passer runs on; bonus for giving it back to him
+    counter_press: {steps: 10, n: 2}                                    # after losing the ball, the n nearest chase it
+    counter:       {steps: 15, lead_mult: 1.6, fwd_mult: 1.5}          # after winning it, run further and pass forward early
+    assist:        {enabled: true}                                      # give it to a teammate with a clearly better shot
+    box:           {x: 0.7, wide: 8.0, post_gap: 8.0, cutback_gap: 18.0}   # ball wide in the final third: far-post run + cut-back spot
+    overlap:       {trigger: 12.0, ahead: 8.0, wide: 7.0, max_dev: 18.0}   # wide midfielder runs round the outside of the carrier
+    drop_deep:     {trigger: 35.0, dist: 12.0}                          # forward comes short when the ball is far behind him
+  # Patience: after `start` steps of unbroken team possession the urgency rises, reaching 1 at `full` steps. It lowers
+  # the shot bar (by shoot) and the forward-pass bar (by pass_relief); at 1 the carrier stops passing back and runs at goal.
+  patience: {enabled: false, start: 60, full: 120, shoot: 0.1, pass_relief: 0.2}
+  # Cutting passing lanes (off = pure zonal defence). While the other team has the ball, players who are not pressing
+  # stand on the line from the ball to a receiver the carrier could pass to, at `frac` of the way to him (0.5 = in the
+  # middle of the two). Only receivers level with or ahead of the ball count (up to `side` m behind it). A player goes
+  # at most `max_dev` m (by role) from his home position, and each lane gets one player.
+  lanes:   {enabled: false, frac: 0.5, side: 8.0, max_dev: {D: 12.0, M: 22.0, F: 22.0}}
+  # Clearance: a defender who is pressed in his own part of the pitch (x <= max_x of the length) and has no teammate
+  # he knows to be free kicks the ball long upfield. w_mate pulls the aim toward a teammate who is ahead of the ball.
+  clear:   {enabled: true, max_x: 0.5, w_mate: 0.5}
+  space:   {radius: 6.0, w_mates: 0.5, w_move: 0.2}   # off-ball attackers drift up to radius m toward free space (0 = off)
+  carrier: {press_dist: 3.0, press_relief: 0.2, better_margin: 0.1,
+            back_tol: 2.0, free_dist: 8.0, carry_free: 10.0, carry_step: 4.0,
+            release_dist: 6.0, release_shoot: 0.0}   # defender within release_dist: shoot (bar lowered) or pass to a free man now   # back passes only under pressure (defender within press_dist): to a teammate with no
+                                                  # visible defender within free_dist (and inside my own vision)
   randomness: {eps_opp: 0.0}          # default off
   playmaker: {sigma: 0}               # 0 = none, otherwise the opponent player number 1..5

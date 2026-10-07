@@ -35,6 +35,8 @@ class Obs:
     slot_type: str                 # "D", "M" or "F"
     radius: float
     mask: np.ndarray = field(default=None)       # (n_actions,) bool
+    incoming: np.ndarray | None = None           # where a pass in flight will land, if this player is the one
+                                                 # who gets it (receiver or interceptor). Not in the flat vector.
     prev_action: int = -1
 
 
@@ -103,6 +105,7 @@ def build_observation(env, team: int, idx: int) -> Obs:
     goal_c = np.array([L, W / 2])
     in_zone = dist(me, goal_c) <= env.cfg.mechanics.shoot_max
     opp_close = (env.holder is not None and env.holder[0] == other and
+                 env.steal_chain < env.cfg.mechanics.max_steal_chain and
                  dist(env.pos[other][env.holder[1]], me_w) <= env.cfg.mechanics.tackle_dist)
 
     partial = dict(frozen=frozen, has_ball=has_ball, anchor=anchor, ball_visible=ball_vis,
@@ -115,6 +118,8 @@ def build_observation(env, team: int, idx: int) -> Obs:
             slot_type=env.book[env.formation[team]].slot_types[idx], radius=rho,
             prev_action=int(env.prev_action[team][idx]))
     o.mask = compute_mask(env, team, idx, partial)
+    if env.ball_state == "flight" and env.flight is not None and env.flight["designated"] == (team, idx):
+        o.incoming = to_frame(team, env.flight["end"], L, W)
     return o
 
 

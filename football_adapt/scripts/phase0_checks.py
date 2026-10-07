@@ -1,4 +1,4 @@
-"""Phase 0 checks (opponent.md Section 13, game.md Section 14).
+"""Phase 0 checks (opponent.md Section 14, game.md Section 14).
 
 Run from the project root:   python -m scripts.phase0_checks --episodes 20
 Use --T 400 for a faster run. Every check prints PASS/FAIL against a threshold you can change below.
@@ -91,11 +91,22 @@ def formation_matrix(cfg, n):
     return env_names, M
 
 
+def style_matrix(cfg, n):
+    names = list(cfg.styles.presets.to_dict())
+    M = np.zeros((len(names), len(names)))
+    for i, a in enumerate(names):
+        for j, b in enumerate(names):
+            env = FootballEnv(cfg, scripted_ours=True)
+            M[i, j] = np.mean([score_of(play(env, None, seed=s, our_style=a, opp_style=b)) for s in range(n)])
+    return names, M
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--episodes", type=int, default=20)
     ap.add_argument("--T", type=int, default=None)
     ap.add_argument("--matrix", action="store_true", help="also compute the formation win matrix")
+    ap.add_argument("--styles", action="store_true", help="also compute the play-style win matrix")
     args = ap.parse_args()
     over = {"time.T": args.T} if args.T else {}
     cfg = load_config(overrides=over)
@@ -117,6 +128,12 @@ def main():
         print("          " + " ".join(f"{x:>6}" for x in names))
         for nm, row in zip(names, M):
             print(f"  {nm:>6}  " + " ".join(f"{x:6.2f}" for x in row))
+    if args.styles:
+        names, M = style_matrix(cfg, max(3, n // 2))
+        print("\nPlay-style win matrix (row = team 0 style, col = team 1 style, score of team 0):")
+        print("              " + " ".join(f"{x:>10}" for x in names))
+        for nm, row in zip(names, M):
+            print(f"  {nm:>10}  " + " ".join(f"{x:10.2f}" for x in row))
 
 
 if __name__ == "__main__":

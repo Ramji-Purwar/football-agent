@@ -97,6 +97,8 @@ obs, info = env.reset(
     radius=None,            # float, our team's vision radius
     radius_opp=None,        # float, opponent's vision radius
     start_team=None,        # int 0 or 1, who starts with ball
+    our_style=None,         # str, play style: "normal" | "aggressive" | "defensive" (default from cfg)
+    opp_style=None,         # str
 )
 # Returns:
 #   obs: {"vec": (5, 79), "mask": (5, 23), "state": (51,)}
@@ -492,6 +494,8 @@ env = FootballEnv(cfg)
 ```
 
 Dotted key notation (`"a.b.c"`) sets nested YAML values. The `Cfg` wrapper allows attribute-style access at any depth. Use `cfg.to_dict()` to serialize back to a dict for logging.
+
+**Play styles.** `styles.presets.<name>` is a partial config that is merged over the config for one team (`apply_style(cfg, name)` returns that team's view). The environment keeps one view per team in `env.team_cfg` and hands it to that team's `ScriptedTeam`. A preset may only set `opponent.*` and `formations.phases.*`; unknown keys and anything else are rejected when the config is loaded. See `opponent.md`, Section 8.
 
 ---
 
