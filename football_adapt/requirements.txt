@@ -1,6 +1,0 @@
-numpy
-pyyaml
-pygame>=2.6   # primary renderer (scripts/pygame_render.py)
-matplotlib    # legacy renderer (scripts/live_render.py)
-pillow        # only for saving GIFs
-pytest        # only for tests
