@@ -79,7 +79,8 @@ ScriptedTeam
 | Counter-attack timer | Possession goes from them to us | 15 steps (`moves.counter.steps`) | 7.7 |
 | Mover (the player who just passed) | A player passes | 10 steps (`moves.pass_move.steps`) | 7.1 |
 | Possession length | Counts every step we keep the ball | Reset when they hold it | 6.5 (patience) |
-| Roles for this step | Every step | One step | Presser, second presser, cover, lane blockers (Section 5) |
+| Unpressed count | Counts the steps of their possession in which none of us is pressing the ball | Reset when we hold the ball | 5.9 (hunt) |
+| Roles for this step | Every step | One step | Presser, second presser, cover, lane blockers, hunters (Section 5) |
 
 A change of possession is only counted between "we hold it" and "they hold it". A loose ball or a pass in flight is not a change.
 
@@ -214,6 +215,20 @@ These are rules of the game (`game.md`, Section 8), listed here because they sha
 | Tackle | Within 2 m of the carrier. It succeeds with probability `my control / (my control + the carrier's control)`. A failed tackle freezes the tackler for 3 steps |
 
 At most two tackles in a row can succeed (A takes from B, B takes it back); after that tackling is off until the ball is passed, shot or picked up, or 15 steps pass.
+
+### 5.8 Closing the Receiver Down
+
+While a pass of the other team is in the air, the player nearest to where it is going runs there, so the receiver is met when the ball arrives and not some steps later. The team reads the ball's line from its last two positions. The receiver is the opponent it sees nearest to that line, ahead of the ball and within 6 m of it (`moves.close_down.lane`). If it sees no such opponent, the player goes to a point 15 m ahead of the ball (`moves.close_down.lead`). A player who is already running to intercept the pass (rule 1 in Section 3) is left to do that.
+
+### 5.9 Going After a Parked Ball (hunt)
+
+Zonal defence leaves a ball alone when it is outside every zone. On its own that lets the other team park the ball deep in its own half, where no zone reaches, and keep it there for the rest of the match. A hand-written team that does only that drew 65% of its matches against pure zonal defence (one hold lasted 1156 of 1200 steps), and a learning agent found the same trick within a few hundred thousand steps.
+
+So the team counts the steps of the other team's possession in which nobody is pressing the ball (no presser and no counter-press). The count runs over one whole possession of theirs: passing the ball around does not reset it, only our team holding the ball does. When it passes 80 (`hunt.after`), the 2 players nearest to the ball (`hunt.n`) leave their zones, go for it and tackle, and keep at it until we have the ball again. They use the team's shared sighting of the ball.
+
+If nobody sees the ball (only possible with `vision.ball_always: false`), the hunters are the 2 players nearest to the goal we attack, and they go and look for it there: 10 m out from the goal line (`hunt.depth`) and 15 m either side of the goal centre (`hunt.wide`). From those two spots they see the whole end of the pitch.
+
+With the hunt, the same hand-written team loses every match (about 0-4). Normal play is not affected: when two scripted teams play each other the count stays under 80 (the most seen was 60, between two defensive teams), so their matches play out move for move as before. `hunt.after: 0` gives pure zonal defence.
 
 ---
 
@@ -543,6 +558,8 @@ Everything below is under `opponent.` in `default.yaml` unless it says otherwise
 | `cover.enabled`, `dist`, `max_dev` | true, 5.0, 4.0 | Cover: how far goal-side of the ball, and how far from home at most (m) |
 | `width.slide`, `slide_rate` | 3.0, 0.3 | Sideways slide of the team toward the ball's side (m, m per step) |
 | `moves.counter_press.steps`, `n` | 10, 2 | Counter-press: for how long, and how many players. Off: steps 0 |
+| `moves.close_down.enabled`, `lane`, `lead` | true, 6.0, 15.0 | Closing the receiver down while their pass is in the air (5.8) |
+| `hunt.after`, `n`, `depth`, `wide` | 80, 2, 10.0, 15.0 | Hunt (5.9): unpressed steps of their possession before we go for the ball, how many players go, and where they look when nobody sees it (m from the goal line, m either side of the goal centre). Off: after 0 |
 | `lanes.enabled` | false | Cutting passing lanes (5.5) |
 | `lanes.frac` | 0.5 | Where on the lane to stand (0.5 = the middle) |
 | `lanes.side` | 8.0 | Receivers up to this far behind the ball still count (m) |
@@ -675,7 +692,7 @@ All events are appended to `env.event_log` and returned in `info["events"]` each
 | `"pickup"` | by | Loose ball analysis |
 | `"switch"` | team, from_, to, t | Detection delay (Q2) |
 
-`info` also carries `g` and `f` (the opponent's and our formation), `styles` (our and the opponent's play style) and `sigma`. Stats accumulated per match are in `env.stats` (passes, completions, tackles, shots, goals, possession steps, shadow steps and more). `env.opp_anchor_dist` tracks the opponent's mean distance from its anchors each step, for the readability check.
+`info` also carries `g` and `f` (the opponent's and our formation), `styles` (our and the opponent's play style) and `sigma`. Stats accumulated per match are in `env.stats` (passes, completions, tackles, shots, goals, possession steps, shadow steps, steps the ball spent in each third of the pitch and more). `env.opp_anchor_dist` tracks the opponent's mean distance from its anchors each step, for the readability check.
 
 ---
 

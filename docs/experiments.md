@@ -165,6 +165,7 @@ Compute from `env.stats` aggregated over 100 eval matches:
 | Tackles won | `tackles_won[0]` |
 | Mean opponent anchor distance | `np.mean(env.opp_anchor_dist)` per episode |
 | Invalid action rate | `invalid_actions[0] / (T * 5)` |
+| Ball in our / the middle / their third | `ball_thirds[k] / T` for `k = 0, 1, 2` (how far up the pitch the team plays) |
 | Shadow steps | `shadow_steps_on_sigma`, `shadow_steps_total` |
 | Formation switches by opponent | `switches` |
 

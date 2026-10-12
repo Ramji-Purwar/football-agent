@@ -4,6 +4,38 @@ This document covers the full training pipeline: the MAPPO algorithm, GRU sequen
 
 ---
 
+## 0. The Trainer (`training/train.py`)
+
+Sections 1 to 6 describe the method. This section is how to run the code that implements it. Run everything from `football_adapt/`. It needs `torch` (the CPU build is enough: the networks are small and the time goes into the game simulation).
+
+```bash
+# Stage 1: short matches, full vision
+python -m training.train --name sanity --T 300 --radius 100 --total-steps 600000 --workers --opp-eps-start 0.5
+# Stage 2: full matches, default vision
+python -m training.train --name easy --total-steps 2000000 --workers --opp-eps-start 0.5
+# a grid of runs, one core each (here the Q1 grid with 3 seeds)
+python -m training.sweep --jobs 28 --formations 2-2-1,2-1-2,1-3-1,1-2-2,3-1-1 --radii 12,25,40,120 --zetas 0,1,2 \
+       --seeds 0,1,2 -- --total-steps 5000000 --opp-eps-start 0.5
+```
+
+| What | How |
+|---|---|
+| Output | `runs/<name>/`: `config.json`, `log.jsonl` (one line per update and per evaluation), `ckpt.pt` and, when the run is finished, `result.json` |
+| Resume | Run the same command again. It continues from `ckpt.pt`; a finished run is skipped. Use this when a node expires |
+| One fast run | `--workers`: each of the `--n-envs` games (default 8) gets its own process |
+| Many runs at once | `training.sweep --jobs N`: one process per run, `N` at a time. Everything after `--` goes to every run |
+| The setting | `--our-formation`, `--radius`, `--zeta` are fixed for a run. `--opp-formations`, `--opp-styles`, `--sigmas` take comma lists, and one value is drawn at every kick-off. `--switching` sets the opponent's switching mode, `--T` the match length |
+| Any other config value | `--set key=value`, for example `--set reward.w_progress=0.005` (can be repeated) |
+| Actor | `--actor mlp` (memoryless) or `--actor gru`. The belief-augmented and oracle variants are not written yet |
+| Easy start | `--opp-eps-start 0.5`, see Section 7 |
+| Evaluation | Every `--eval-interval` steps, `--eval-matches` matches on fixed seeds against the opponent at full strength; `--final-eval-matches` at the end |
+| Watching a trained team | `python -m scripts.pygame_render --ckpt runs/<name>/ckpt.pt` (it is the blue team). Add `--opp-eps 0.45` for the weakened opponent it trains against. `scripts.watch_match` takes the same two flags and writes a GIF |
+| Using a trained team in code | `MAPPOAgent.load("runs/<name>/ckpt.pt")` in `agents/mappo.py` has the same `act(obs)` as `RandomAgent` |
+
+Speed: one core plays about 375 game steps per second. With `--workers` on 8 games a 12-core laptop reached about 650 to 830 steps per second for the MLP actor. The GRU update costs more (about 3.6 s per 2048 game steps on one core against 6 s of simulation).
+
+---
+
 ## 1. Algorithm: Parameter-Shared MAPPO
 
 We use **Multi-Agent PPO (MAPPO)** with full parameter sharing: all 5 of our players run the **same** actor network and share the **same** centralized critic.
@@ -207,18 +239,18 @@ class MaskedCategorical:
 | `gamma` | 0.99 | Discount factor |
 | `lam` | 0.95 | GAE lambda |
 | `clip_eps` | 0.2 | PPO clip range |
-| `n_epochs` | 10 | Update epochs per rollout |
+| `n_epochs` | 5 | Update epochs per rollout (`--epochs`). 10 doubles the time spent in the update |
 | `batch_size` | 512 | Minibatch size (steps × players) |
 | `entropy_coef` | 0.01 | Entropy bonus coefficient |
 | `value_coef` | 0.5 | Value loss weight |
 | `max_grad_norm` | 0.5 | Gradient clipping |
 | `SEQ_LEN` | 32 | GRU sequence chunk length |
-| `ROLLOUT_LEN` | 1200 | Steps per rollout (full episode) |
-| `n_envs` | 8–16 | Parallel environments |
+| `ROLLOUT_LEN` | 256 | Steps per game between updates (`--rollout-len`): 2048 game steps per update with 8 games |
+| `n_envs` | 8 | Games played side by side (`--n-envs`) |
 | `total_steps` | 10M–50M | Total environment steps |
 | `shaping_anneal_end` | 5M steps | Steps at which `lambda_t → 0` |
 
-These are starting points. Tune during the first easy-setting runs (one formation, full vision).
+These are the defaults of `training/train.py`, and each is a flag there. They are starting points. Tune during the first easy-setting runs (one formation, full vision).
 
 ---
 
@@ -237,11 +269,41 @@ env.set_shaping_weight(w)
 
 The `shape_cap = 5.0` per episode hard-caps total shaping regardless of `lambda_t`.
 
+With the easy start (Section 7) the trainer does not start this anneal at step 0. The weight stays at 1.0 while the opponent is still weakened, and the anneal over `--shaping-anneal-end` steps starts at the step where the opponent first reaches full strength. The reason is a run in which the weight had fallen to 0.6 while the opponent was still 40% random: the attack faded (13 shots a match down to 4). Two runs restarted from the same checkpoint with the weight held at 1.0 kept shooting 6 to 11 times a match.
+
+The shaping terms are listed in `game.md`, Section 9. Two of them matter for getting a team to attack at all: `w_progress` pays for moving the ball toward the opponent's goal (without it a new policy never reaches the shooting zone), and `w_pass` is 0 because a bonus per completed pass was farmed by passing back and forth.
+
 ---
 
 ## 7. Training Curriculum
 
 Run these stages in order. Mark the transition step on all learning curves.
+
+### Easy start: a weaker opponent first (`--opp-eps-start`)
+
+Against the scripted team at full strength a new policy does not learn to attack. It never gets near the goal, so it never sees a shot or a goal, and the best thing it finds is to keep the ball away from the opponent. The trainer therefore starts against a weakened opponent and makes it stronger as our team improves.
+
+- `--opp-eps-start 0.5`: each opponent player acts at random on half of its steps (`opponent.randomness.eps_opp`, see `opponent.md`).
+- After every 50 training matches the trainer looks at our win score (wins + draws / 2) over those matches. At 0.6 or more the randomness drops by 0.05, down to the config value (0 = full strength). At 0.4 or less it goes back up by 0.05, up to the start value. In between it stays. The four numbers are `EPS_STEP`, `EPS_WINDOW`, `EPS_HARDER` and `EPS_EASIER` at the top of `training/train.py`.
+- Evaluations are always against the opponent at full strength, so the evaluation lines are the honest measure. Every training line in `log.jsonl` carries `opp_eps`: how far it has fallen shows how far a run has come.
+
+What the first runs showed (one seed each, 2-2-1 against 2-2-1, memoryless actor, a laptop):
+
+| Run | What happened |
+|---|---|
+| Full-strength opponent from step 0, 600k steps, 300-step matches, full vision (six variants of the reward and rules) | No wins and almost no shots in any of them. The team keeps the ball deep in its own half, where the scripted team did not come for it at the time (it does now: `opponent.md`, 5.9) |
+| Opponent 25% random, same setting | The same: no attack in 600k steps |
+| Opponent 50% random, with `w_progress` | Attacks from about 250k steps. At 600k: 60% wins against that opponent, one goal per 300-step match, the ball in their third 43% of the time |
+| Opponent 50% random, `w_progress` off | No attack in 600k steps: one shot in 40 evaluation matches |
+| Opponent 50% random, full matches, 25 m vision, `w_pass = 0.02` | Pass farming: 286 passes a match, no shots |
+| The same with `w_pass = 0` | Shots rise from 0 to about 10 a match by 600k steps, close to one goal a match. Repeated against the scripted team that hunts a parked ball (`opponent.md`, 5.9): 12 shots and 0.9 goals a match at 600k, and no hiding (the ball in our third 21% of the time) |
+| The attacking team, then the opponent made stronger on a fixed timetable (50% to 0 in 500k steps) | The attack faded as fast as the opponent improved. No wins at full strength |
+| The attacking teams, then the opponent made stronger only as they got ahead (the rule above), 600k more steps | Full matches: from 50% down to 40% random. Short matches: from 35% to between 25% and 30%. Against the full-strength opponent both still lose every match (about 0-7 over a full match) |
+| The full-match team continued to 3M steps, shaping annealed from step 0 | It reached 35% random at 1.6M steps with 10 to 13 shots a match. Then the attack faded (about 4 shots a match, the ball in their third 8% of the time) and the opponent was eased back to 45%. No win against the full-strength opponent at any evaluation (0-7 at the end) |
+| The same from the 1.2M checkpoint with the shaping weight held at 1.0, two seeds, to 2.4M steps | The attack did not fade (6 to 11 shots a match throughout). The opponent still did not get stronger: one run moved between 35% and 40% random, the other slid back to 50%. No win against the full-strength opponent (between 0-6 and 0-7) |
+| Open passes only, and receiving automatic (`game.md`, Section 8.2), 600k steps | Before these two the teams above made under one pass a match: half of their passes were intercepted and most of the rest landed where nobody was. With them: 15 to 19 passes a match, about 90% completed, and the opponent could be strengthened from 50% to 15% random in 540k steps. Against the full-strength opponent: 3 wins and 2 draws in 20 matches, 2.4 goals for and 5.2 against a match. These are the first wins at full strength |
+
+So the easy start gets a team that attacks, and the trainer keeps the opponent at a level the team can just beat. Without passing, no team competed with the full-strength scripted team, and training longer did not get there: every long run stalled at an opponent that is 35% to 50% random. Keeping the shaping weight up keeps the attack alive (which is why the anneal now waits, Section 6), but it did not lift that ceiling. The carrier dribbled alone. What lifted it was making passing work (the last row): the team still loses more than it wins at full strength, but it now scores there and wins some matches.
 
 ### Stage 1: Sanity Check
 
@@ -253,7 +315,7 @@ Expected: random policy gets near-zero win rate within 100k steps. If not, the r
 
 Config: `T=1200`, single formation, `radius=25` (default), `zeta=2`.
 
-Expected: trained policy clearly beats random (win rate > 80%) and approaches heuristic baseline (win rate > 40% against heuristic) within 2M steps.
+Expected: trained policy clearly beats random (win rate > 80%) and approaches heuristic baseline (win rate > 40% against heuristic) within 2M steps. This target has not been reached yet: see the table above.
 
 **Check:** if the policy does not beat random after 2M steps:
 - Check that masks are applied correctly (high `invalid_actions` count = mask bug)
@@ -281,6 +343,10 @@ Use the recurrent actor. Each run: 10M steps.
 ---
 
 ## 8. What to Log
+
+`training/train.py` writes `runs/<name>/log.jsonl`. A `"kind": "train"` line after every update holds the losses, the entropy, `shaping_weight`, `opp_eps` and the mean over the training matches that finished in that update of: `win`, `draw`, `goal_diff`, `goals_for`, `shaping_return`, `passes`, `pass_completion`, `shots`, `possession`, `ball_own_third` / `ball_mid_third` / `ball_their_third`, `invalid_action_rate`, `opp_anchor_dist`. A `"kind": "eval"` line every `--eval-interval` steps (and a `"final"` line at the end) holds the same match fields plus `W`, from matches on fixed seeds against the opponent at full strength. `goal_diff_over_time` and the Q2 and Q3 metrics below are not written yet.
+
+Read the behaviour fields, not only the win rate. A team that is not attacking shows `shots` near 0 and `ball_their_third` under 0.1; a team that is hiding the ball shows high `possession` with `ball_own_third` above 0.5.
 
 Log these every `EVAL_INTERVAL = 100_000` training steps:
 
@@ -341,7 +407,9 @@ with open(f"runs/{run_id}/config.json", "w") as f:
 
 ## 9. Parallel Environments
 
-Use multiple environments in parallel to increase sample throughput:
+As implemented in `training/train.py`: without `--workers` the games of a run are stepped one after the other in one process. With `--workers` each game has its own process, which holds a copy of the policy, plays its whole rollout alone and sends the buffer back. Sending every single step through a pipe instead was more than four times slower, because the processes wait for each other at every step. Each run uses one thread for the update (`--torch-threads`); more threads make several runs on one machine fight over the cores.
+
+The sketch below is the simple idea behind it:
 
 ```python
 from multiprocessing import Pool
@@ -404,6 +472,11 @@ def evaluate(agent, cfg, n_matches=100):
 |---|---|---|
 | Win rate stuck at ~0 | Action mask not applied | Check `invalid_action_rate`; apply mask before sampling |
 | High shaping, flat win rate | Shaping reward hacked | Reduce `shaping_weight`; add distance scaling to pass reward |
+| Hundreds of passes a match, no shots | The pass bonus is being farmed | Keep `reward.w_pass` at 0 (forward passes are paid by `w_progress`) |
+| Next to no passes | Passing loses the ball too often to be worth it | Keep `actions.open_pass` on and receiving automatic (`game.md`, Section 8.2). Check `passes` and `pass_completion` in the log |
+| No shots, `ball_their_third` under 0.1, many 0-0 draws | The opponent is too strong for a new policy to get near the goal | Use the easy start (`--opp-eps-start 0.5`) and keep `reward.w_progress` on |
+| High possession, `ball_own_third` above 0.5, draws | The team is hiding the ball in its own half | The scripted team goes and gets a parked ball (`opponent.hunt`, `opponent.md` 5.9): check `hunt.after` is not 0 |
+| Good against the weakened opponent, heavy defeats in the evaluations | The opponent has not been strengthened far enough yet | Train longer; watch `opp_eps` fall in `log.jsonl` |
 | GRU not learning Q2 | Sequences too short | Increase `SEQ_LEN` to 64 or 128 |
 | Q2 belief filter beats recurrent | Hidden state not used | Check that hidden state is propagated (not reset each step) |
 | NaN loss | Learning rate too high | Reduce `lr_actor`, add gradient clipping |

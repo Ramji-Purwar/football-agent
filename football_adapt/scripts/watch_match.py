@@ -2,6 +2,7 @@
 
    python -m scripts.watch_match --mode scripted --out match.gif
    python -m scripts.watch_match --mode random --radius 15 --sigma 3 --opp-mode SCHEDULED
+   python -m scripts.watch_match --ckpt runs/stage2_easy_start/ckpt.pt --T 1200 --out trained.gif
 """
 from __future__ import annotations
 import argparse
@@ -52,19 +53,29 @@ def main():
     ap.add_argument("--opp-mode", default="NONE")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default="match.gif")
+    ap.add_argument("--ckpt", default=None,
+                    help="a trained team (runs/<name>/ckpt.pt) plays blue, with the vision and formation it was trained with")
+    ap.add_argument("--opp-eps", type=float, default=None,
+                    help="red players act at random this often, 0..1 (the weakened opponent of the easy start)")
     a = ap.parse_args()
     cfg = load_config(overrides={"time.T": a.T, "opponent.switching.mode": a.opp_mode,
-                                 **({"vision.radius": a.radius} if a.radius else {})})
-    env = FootballEnv(cfg, scripted_ours=(a.mode == "scripted"))
-    obs, _ = env.reset(seed=a.seed, sigma=a.sigma)
-    ag = RandomAgent(a.seed)
+                                 **({"vision.radius": a.radius} if a.radius else {}),
+                                 **({"opponent.randomness.eps_opp": a.opp_eps} if a.opp_eps is not None else {})})
+    ag, trained = (RandomAgent(a.seed) if a.mode == "random" else None), {}
+    if a.ckpt:
+        from agents.mappo import MAPPOAgent        # needs torch, so it is imported only when asked for
+        ag = MAPPOAgent.load(a.ckpt, seed=a.seed)
+        t = ag.train_args
+        trained = dict(zeta=t.get("zeta"), radius=None if a.radius else t.get("radius"), our_formation=t.get("our_formation"))
+    env = FootballEnv(cfg, scripted_ours=(ag is None))
+    obs, _ = env.reset(seed=a.seed, sigma=a.sigma, **trained)
     frames = []
     done = False
     while not done:
         if env.t % a.stride == 0:
             frames.append((env.pos.copy(), env.ball_pos.copy(), env.holder, env.anchors.copy(),
                            env.t, tuple(env.score), tuple(env.formation)))
-        obs, _, done, _ = env.step(ag.act(obs) if a.mode == "random" else None)
+        obs, _, done, _ = env.step(ag.act(obs) if ag else None)
     fig, ax = plt.subplots(figsize=(8, 5))
     def update(k):
         pos, ball, holder, anchors, t, score, form = frames[k]

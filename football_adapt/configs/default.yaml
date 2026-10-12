@@ -8,8 +8,18 @@
 pitch:   {length: 100.0, width: 60.0, goal_width: 12.0}
 time:    {T: 1200, T_half: 600}
 speeds:  {player: 1.0, dribble: 0.75, pass: 3.0}   # dribble = speed of the player carrying the ball
-vision:  {radius: 25.0}               # normal players. The playmaker uses infinity
-actions: {n_directions: 8}
+vision:
+  radius: 25.0                        # how far a player sees OPPONENTS. The playmaker uses infinity
+  # The ball is seen by everyone, wherever it is, and so every defender who can get to the path of a pass in time may
+  # intercept it. false = the ball is hidden outside the radius too, and only a defender who has the passer inside
+  # his radius reacts to a pass.
+  ball_always: true
+actions:
+  n_directions: 8
+  # A learning team is offered PASS_k only when no defender the passer can SEE could get to the ball: not by the
+  # interception rule with `slack` extra steps in hand, and not by standing within `lane` m of the cut-out radius of
+  # the ball's path. It is the test the scripted team makes before it passes. enabled: false = every pass is offered.
+  open_pass: {enabled: true, slack: 1.5, lane: 1.5}
 
 mechanics:
   tackle_dist: 2.0
@@ -37,10 +47,13 @@ structure: {zeta: 2}                  # our structure level: 0, 1 or 2 (the oppo
 
 reward:
   eta: 1.0
-  w_pass: 0.02
+  w_pass: 0.0                         # off: a bonus per completed pass is farmed by passing back and forth. Forward passes are paid by w_progress
   w_tackle: 0.02
-  w_shot: 0.02
+  w_shot: 0.02                        # times the shot's chance of scoring (a certain goal earns all of it)
   w_turnover: -0.02
+  w_progress: 0.002                   # per metre the ball moves toward their goal while we keep it (back = minus)
+  progress_pass_cap: 20.0             # ... but one pass is paid for at most this many metres (0 = no cap): building
+                                      # up with several passes earns more than one long ball over the same ground
   shape_cap: 5.0                      # cap on total |shaping| per episode
   shaping_weight: 1.0                 # lambda_t: the trainer anneals this toward 0
 
@@ -124,6 +137,9 @@ opponent:
     through:       {enabled: true, lead: 8.0, space: 8.0, bonus: 0.1, cut_margin: 0.5}   # pass into space ahead of a runner
     pass_move:     {steps: 10, run: 12.0, one_two_bonus: 0.4}          # passer runs on; bonus for giving it back to him
     counter_press: {steps: 10, n: 2}                                    # after losing the ball, the n nearest chase it
+    # their pass is in the air: the player nearest to where it is going closes the receiver down. The receiver is the
+    # opponent seen within `lane` m of the ball's line; if none is seen, a point `lead` m ahead of the ball.
+    close_down:    {enabled: true, lane: 6.0, lead: 15.0}
     counter:       {steps: 15, lead_mult: 1.6, fwd_mult: 1.5}          # after winning it, run further and pass forward early
     assist:        {enabled: true}                                      # give it to a teammate with a clearly better shot
     box:           {x: 0.7, wide: 8.0, post_gap: 8.0, cutback_gap: 18.0}   # ball wide in the final third: far-post run + cut-back spot
@@ -145,5 +161,11 @@ opponent:
             back_tol: 2.0, free_dist: 8.0, carry_free: 10.0, carry_step: 4.0,
             release_dist: 6.0, release_shoot: 0.0}   # defender within release_dist: shoot (bar lowered) or pass to a free man now   # back passes only under pressure (defender within press_dist): to a teammate with no
                                                   # visible defender within free_dist (and inside my own vision)
+  # Hunt: zonal defence leaves a ball alone that stays outside every zone, so the other team could sit on it deep in
+  # its own half for the rest of the match. The steps of one possession of theirs in which none of us is pressing the
+  # ball are counted; past `after` the `n` nearest players leave their zones and go for it, until we have the ball
+  # again. If nobody sees the ball they go and look for it near the goal we attack: `depth` m out from the goal line,
+  # `wide` m either side of its centre. after: 0 = off (pure zonal defence).
+  hunt:    {after: 80, n: 2, depth: 10.0, wide: 15.0}
   randomness: {eps_opp: 0.0}          # default off
   playmaker: {sigma: 0}               # 0 = none, otherwise the opponent player number 1..5

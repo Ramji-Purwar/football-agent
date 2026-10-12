@@ -1,7 +1,8 @@
 # football_adapt: the 5-a-side football game and its opponent
 
 Code for the project described in `game.md` and `opponent.md`.
-Run everything from the project root (the folder containing this README), using `python -m ...`.
+Run everything from inside the `football_adapt/` folder (`cd football_adapt`), using `python -m ...`.
+The imports (`from football import ...`, `from opponent.controller import ...`) resolve only from there.
 
 ## Documentation
 
@@ -38,7 +39,11 @@ football_adapt/
 │   └── controller.py           ScriptedTeam: zonal defence, attack, support, playmaker
 ├── agents/
 │   ├── __init__.py
-│   └── random_agent.py         random baseline (uses the action mask)
+│   ├── random_agent.py         random baseline (uses the action mask)
+│   └── mappo.py                shared-policy MAPPO networks (MLP or GRU actor, central critic); needs torch
+├── training/
+│   ├── train.py                one training run: rollouts, PPO update, evaluation, checkpoints, resume
+│   └── sweep.py                a grid of training runs side by side, one core each
 ├── scripts/
 │   ├── __init__.py
 │   ├── phase0_checks.py        the Phase 0 checks and the formation win matrix
@@ -48,7 +53,7 @@ football_adapt/
     └── test_smoke.py           a few basic tests
 ```
 
-Still to be added by the team (not included): `agents/mappo.py` and `training/train.py` (shared-policy PPO with GRU), `analysis/` (probes, metrics, plots).
+Still to be added by the team (not included): the belief-filter and oracle agents (`agents/belief_filter.py` is empty), `analysis/` (probes, metrics, plots).
 
 ## How to use
 
@@ -68,7 +73,7 @@ while not done:
 - `FootballEnv(cfg, scripted_ours=True)` drives OUR side with the scripted team too (heuristic vs heuristic, used by Phase 0).
 - `info` carries the hidden truth for oracles and probes: `info["g"]` (opponent formation), `info["sigma"]`, `info["switch"]`.
 - Play styles: `env.reset(our_style=..., opp_style=...)` with `"normal"`, `"aggressive"` or `"defensive"` (defaults in `styles` in the config; `info["styles"]` reports them). See `docs/opponent.md`, Section 8 (the whole document has annotated pictures of how the scripted team plays).
-- `env.event_log` and `env.stats` hold passes, tackles, shots, goals, switches, shadow counts. Compute metrics from them.
+- `env.event_log` and `env.stats` hold passes, tackles, shots, goals, switches, shadow counts, and how long the ball spent in each third of the pitch. Compute metrics from them.
 - Call `env.set_shaping_weight(lambda_t)` from the trainer to anneal the shaping reward.
 
 Commands:
@@ -76,7 +81,10 @@ Commands:
 ```
 python -m scripts.phase0_checks --episodes 20 --T 600 --matrix
 python -m scripts.watch_match --mode scripted --out match.gif
+python -m scripts.pygame_render --ckpt runs/stage2_easy_start/ckpt.pt        # watch a trained team (blue)
 python -m pytest -q
+python -m training.train --name sanity --T 300 --radius 100 --total-steps 600000 --workers --opp-eps-start 0.5
+python -m training.sweep --jobs 28 --radii 12,25,40,120 --zetas 0,1,2 --seeds 0,1,2 -- --total-steps 5000000 --opp-eps-start 0.5
 ```
 
 ## Things to know before you trust any result
@@ -93,8 +101,10 @@ python -m pytest -q
 ## Simplifications built into the code (all stated in game.md)
 
 - Goals come only from shots. The ball is clamped to the pitch (no throw-ins or corners).
-- A pass is decided at release (interception geometry), then the ball flies for a few steps.
+- A pass is decided at release (interception geometry), then the ball flies for a few steps. The player it is going to
+  walks to where it lands by himself (the game does this for a learning team). A learning team is only offered the
+  passes it can see are open.
 - Our agent moves in `n_directions` discrete directions. Macros (`HOLD_SHAPE`, `GO_TO_BALL`, `SHADOW_j`) and the
   opponent use the same `MOVE_TO` movement routine and speed limit.
-- Teammate positions, possession, score and time are always known. Opponents and the ball are visible only inside the radius.
+- Teammate positions, possession, score and time are always known. Everyone sees the ball. Opponents are visible only inside the radius.
 - No side swap: both teams attack toward +x in their own frame (team 1 is rotated 180 degrees in world coordinates).

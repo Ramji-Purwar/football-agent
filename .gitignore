@@ -44,3 +44,5 @@ wheels/
 .installed.cfg
 *.egg
 ./venv
+# Training output
+runs/

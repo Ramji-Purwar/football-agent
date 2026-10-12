@@ -13,7 +13,7 @@ We build a small 2D football game and train a team of AI players to play it.
 - Two teams of **5 outfield players**. No goalkeepers.
 - **Our team** is controlled by **one shared neural network** (parameter-shared MAPPO). All five players run the same network, each on its own local view.
 - The **opponent team** is not learned. It follows hand-written rules (see `opponent.md`).
-- Every player has **limited vision**: it sees opponents and the ball only within a radius around itself.
+- Every player has **limited vision**: it sees opponents only within a radius around itself. Everyone sees the ball.
 - Teams play in **formations** (e.g. 2-2-1). The opponent may **change formation mid-match**, and one opponent player can be a **playmaker** who sees the whole pitch.
 
 **Project theme: structure versus information.** When players cannot see everything, how much can a formation (structure) compensate, how well can the team infer what the opponent is doing, and can it adapt to an opponent with extra information?
@@ -134,10 +134,11 @@ The control rating multiplies tackle probability, pass accuracy (noise scale), a
 | Playmaker | `infinity` (sees the whole pitch) |
 
 - A point is visible to a player if its distance is `<= R_VISION`.
-- A player **always** knows: all 4 teammates' positions, possession state, score, and time.
-- A player sees opponents and the ball **only** within its radius.
+- A player **always** knows: all 4 teammates' positions, the ball's position, possession state, score, and time.
+- A player sees opponents **only** within its radius.
+- **The ball is seen by everyone** (`vision.ball_always: true`). The radius hides opponents, not the ball. With `ball_always: false` the ball is hidden outside the radius as well.
 - Hidden entries in the observation are **zero** and the visibility flag is 0 — so the network can distinguish "not seen" from "seen at origin".
-- **Interception requires sight:** a defender can only intercept a pass if the ball was inside its vision radius when the pass was played.
+- **Everyone can react to a pass.** Since everyone sees the ball, any defender who can get to the ball's path in time may intercept (Section 8.2), however far he is from the passer. A passer who does not see that defender cannot allow for him, so a long ball into a part of the pitch the passer cannot see is a gamble. (With `ball_always: false`, only a defender who had the passer inside his radius when the pass was played may intercept.)
 
 ---
 
@@ -151,7 +152,7 @@ Total action count with `D=8` directions: **23 actions**.
 | 8 | `STAY` | always valid |
 | 9 | `HOLD_SHAPE` | masked when `zeta = 0` |
 | 10 | `GO_TO_BALL` | masked when ball not visible |
-| 11 – 14 | `PASS_k` (4 teammates, ascending by player index) | masked when not holding ball |
+| 11 – 14 | `PASS_k` (4 teammates, ascending by player index) | masked when not holding ball. For a learning team also masked when a defender the passer can see could get to the ball (`actions.open_pass`, Section 8.2) |
 | 15 | `DRIBBLE_GOAL` | masked when not holding ball |
 | 16 | `SHOOT` | masked when not holding ball or outside shoot zone |
 | 17 | `TACKLE` | masked when no opponent carrier within `D_TACKLE` |
@@ -162,6 +163,7 @@ Notes:
 - `HOLD_SHAPE`, `GO_TO_BALL`, `DRIBBLE_GOAL`, `SHADOW_j` are macros built on `MOVE_TO(point)`.
 - `PASS_k` where `k=0..3` maps to the 4 teammates in ascending player index order (self excluded).
 - Invalid actions are masked: the policy cannot select them, but if the raw integer arrives, the env replaces it with `STAY`.
+- A frozen player, and a player of a learning team who has a pass on its way to him, has only `STAY` in his mask. The second one is not standing still: the game walks him to where the ball lands (Section 8.2).
 - `MOVE_TO` (macro used by scripted controllers) is **not** in the learner's indexed action set.
 - `CLEAR` (macro used by scripted controllers, also not in the learner's set) is a clearance: the carrier kicks the ball up to `mechanics.clear.dist` = 40 m toward a point (default: straight upfield), with an aiming error of `mechanics.clear.spread` = 0.2 rad. The ball goes over everyone, so it cannot be intercepted or cut out in flight. It lands loose and whoever reaches it first picks it up.
 
@@ -188,13 +190,17 @@ Notes:
 
 1. Passer chooses `PASS_k`. Target = position of teammate `k` at release.
 2. Angular error added: `error ~ Normal(0, S_PASS² * (1 - c_passer))`. Larger error when control rating is lower.
-3. **Interception check** for each defender `d` that **was inside its radius when the pass was played**:
+3. **Interception check** for each defender `d` (every defender who is not frozen: Section 6):
    - `q` = closest point on pass segment to `d`
    - `t_ball = ||q - passer|| / V_PASS`
    - `t_def = ||q - d|| / V_PLAYER`
    - Intercepts if `t_def <= t_ball + INTERCEPT_MARGIN`
 4. Ball flies for `ceil(||passer - end|| / V_PASS)` steps. Result is decided at release.
 5. If receiver is within `D_PICKUP` when ball arrives, they take possession; otherwise ball is loose.
+
+**Receiving is automatic.** The player a pass is going to (the receiver, or the defender who will intercept it) walks to the point where it lands. The scripted team does this by its first rule. For a learning team the game does it: for the steps the ball is in the air his own action is ignored. So a pass that is "completed" at release does not end up loose because the receiver wandered off. A learning team that had to learn this for itself completed a third of its passes; walking to the landing point makes it about 90%.
+
+**Open passes only** (`actions.open_pass`). A learning team is offered `PASS_k` only when no defender the passer can **see** could get to the ball: not by the interception rule above with `slack` = 1.5 extra steps in hand, and not by standing within `lane` = 1.5 m of the cut-out radius of the ball's path. It is the test the scripted team makes before it passes. A defender the passer does not see can still take the ball, so vision still matters. Without this filter half of a learning team's passes were intercepted and it stopped passing altogether. `enabled: false` offers every pass.
 
 ### 8.3 Dribbling
 
@@ -278,16 +284,22 @@ R_t = R_team + lambda_t * phi(state, actions) + [t == T] * ETA * sign(goal_diffe
 |---|---|---|
 | `R_team` | +1 / -1 | Goal scored / conceded |
 | `ETA` | 1.0 | End-of-match outcome bonus |
-| `w_pass` | +0.02 | Completed pass (scaled by forward advancement) |
+| `w_pass` | 0 (off) | Completed pass (scaled by forward advancement). Off because it was farmed, see below |
 | `w_tackle` | +0.02 | Successful tackle by our team |
-| `w_shot` | +0.02 | Shot by our team |
+| `w_shot` | +0.02 × chance | Shot by our team, paid by its chance of scoring (a flat bonus was collected with hopeful shots from 33 m) |
 | `w_turnover` | -0.02 | Turnover (pass intercepted by opponent) |
+| `w_progress` | +0.002 per m | The ball moves toward their goal while we keep it (moving back = minus) |
+| `progress_pass_cap` | 20 m | The most progress one pass is paid for |
 | `shape_cap` | 5.0 | Maximum total `|shaping|` per episode |
 | `shaping_weight` | 1.0 → 0 | Annealed during training |
 
 All five players receive the **same team reward**.
 
+**Progress** (`w_progress`): on every step where our team holds the ball, the reward is `w_progress` times the metres the ball has moved toward the opponent's goal since we were last paid. Carrying the ball forward is paid step by step, a pass is paid in one go when a teammate has it, and moving back costs the same amount, so going back and forth earns nothing. Nothing is paid across a goal, a kickoff or a lost ball. Carrying the ball the whole pitch is worth 0.2, a fifth of a goal. One pass is paid for at most `progress_pass_cap` = 20 m, so three 20 m passes up the pitch earn three times what one 60 m ball earns: a team that had learned to score only from long balls to a forward waiting by the goal gets a reason to build up as well. The long ball is still allowed and still scores. Without this term a new policy never reaches the shooting zone (a random policy takes no shot at all in 20 matches), so it never sees a shot or a goal and has nothing to learn attacking from.
+
 **Reward-hacking watch:** always log shaping return and win rate together. If shaping rises while win rate is flat, reduce `lambda` or reweight the pass reward by forward distance or defenders beaten.
+
+This has already happened once. With `w_pass = 0.02` and full-length matches, a policy learned to pass back and forth between teammates: 286 passes a match, the shaping cap reached, and not one shot. A bonus that is paid for every completed pass can always be collected that way, so `w_pass` is now 0 and forward passes are paid through `w_progress`, which cannot be farmed.
 
 ---
 
@@ -308,7 +320,7 @@ Each player gets its own observation vector and action mask. Positions are **rel
 | Own formation | one-hot over 5 formations | 5 |
 | Teammates (4) | (dx, dy) relative + has_ball each | 12 |
 | Opponents (5) | (dx, dy) relative + visibility flag (zeros if not visible) | 15 |
-| Ball | (dx, dy) relative + visibility flag | 3 |
+| Ball | (dx, dy) relative + visibility flag (always 1 with `vision.ball_always`) | 3 |
 | Match info | possession one-hot (OWN/OTHER/LOOSE), score diff clipped/3, t/T | 5 |
 | **Total** | | **79** |
 
@@ -414,7 +426,7 @@ See `experiments.md` for the full evaluation protocol. Key metrics:
 | Playmaker cost | Q3 |
 | Recovery ratio | Q3 |
 | Shadow rate | Q3 |
-| Behaviour stats (possession, pass completion, shots, spread) | All |
+| Behaviour stats (possession, pass completion, shots, spread, share of time the ball is in each third) | All |
 
 Report mean ± std over 5 training seeds with **paired evaluation** seeds.
 
@@ -457,8 +469,10 @@ All values from `configs/default.yaml` at project head:
 pitch:   {length: 100.0, width: 60.0, goal_width: 12.0}
 time:    {T: 1200, T_half: 600}
 speeds:  {player: 1.0, dribble: 0.75, pass: 3.0}
-vision:  {radius: 25.0}
-actions: {n_directions: 8}
+vision:  {radius: 25.0, ball_always: true}
+actions:
+  n_directions: 8
+  open_pass: {enabled: true, slack: 1.5, lane: 1.5}
 
 mechanics:
   tackle_dist: 2.0
@@ -478,10 +492,12 @@ structure: {zeta: 2}
 
 reward:
   eta: 1.0
-  w_pass: 0.02
+  w_pass: 0.0
   w_tackle: 0.02
   w_shot: 0.02
   w_turnover: -0.02
+  w_progress: 0.002
+  progress_pass_cap: 20.0
   shape_cap: 5.0
   shaping_weight: 1.0
 

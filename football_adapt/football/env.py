@@ -71,6 +71,7 @@ class FootballEnv:
         self.done = False
         self.shaping_used = 0.0
         self.shaping_weight = float(c.reward.shaping_weight)
+        self.progress_x = None             # ball x when our possession was last paid for progress (None = not ours)
         self.event_log = []
         self.stats = self._new_stats()
         self.opp_anchor_dist = []
@@ -90,7 +91,8 @@ class FootballEnv:
         return dict(passes=z(), passes_completed=z(), interceptions=z(), tackles_won=z(), tackles_failed=z(),
                     shots=z(), goals=z(), possession_steps=z(), invalid_actions=z(),
                     sigma_passes_made=0, sigma_passes_received=0, sigma_interceptions=0,
-                    shadow_steps_on_sigma=0, shadow_steps_total=0, switches=0, clearances=z())
+                    shadow_steps_on_sigma=0, shadow_steps_total=0, switches=0, clearances=z(),
+                    ball_thirds=[0, 0, 0])     # steps with the ball in our third / the middle / their third
 
     def _apply_formation(self, team, name):
         self.formation[team] = name
@@ -232,6 +234,11 @@ class FootballEnv:
                     if obs[team][i].frozen:
                         valid = False
                     self.prev_action[team][i] = -1 if idx is None else idx
+                # A pass is on its way to this player (as receiver or interceptor): he goes to where it lands. The
+                # scripted team does this by its first rule; for a learning team the game does it, whatever it chose.
+                if obs[team][i].incoming is not None and self.controllers.get(team) is None and not obs[team][i].frozen:
+                    act, valid = Action(Kind.MOVE_TO, obs[team][i].incoming), True
+                    self.prev_action[team][i] = -1
                 if not valid:
                     self.stats["invalid_actions"][team] += 1
                     act = STAY
@@ -341,6 +348,20 @@ class FootballEnv:
 
         # 8. rewards, logs, advance --------------------------------------------------------
         team_r = (1.0 if goal_by == 0 else 0.0) - (1.0 if goal_by == 1 else 0.0)
+        # progress: metres the ball moved toward their goal while we kept it (back = minus, so going back and
+        # forth earns nothing). A pass is paid when a teammate has it; nothing is paid across a goal or a lost ball.
+        # One pass is paid for at most progress_pass_cap metres, so that three passes up the pitch earn more than
+        # one long ball over the same ground.
+        if goal_by is None and self.holder is not None and self.holder[0] == 0:
+            if self.progress_x is not None:
+                gain = self.ball_pos[0] - self.progress_x
+                if c.reward.progress_pass_cap > 0:
+                    gain = min(gain, c.reward.progress_pass_cap)
+                shaping += c.reward.w_progress * gain
+            self.progress_x = float(self.ball_pos[0])
+        elif goal_by is not None or not (self.ball_state == "flight" and self.flight["passer"][0] == 0):
+            self.progress_x = None
+        self.stats["ball_thirds"][min(2, int(3 * self.ball_pos[0] / L))] += 1
         shaped = self.shaping_weight * shaping
         room = self.cfg.reward.shape_cap - self.shaping_used
         shaped = float(np.clip(shaped, -room, room)) if room > 0 else 0.0
@@ -398,8 +419,11 @@ class FootballEnv:
         ang = float(self.rng.normal(0.0, std)) if std > 0 else 0.0
         target = np.clip(passer + rotate(target - passer, ang), [0, 0], [self.L, self.W])
 
+        # who may react to the pass: everyone, since everyone sees the ball (or, with vision.ball_always off, only
+        # those who have the passer inside their radius)
         defenders = [(j, self.pos[other][j]) for j in range(5)
-                     if self.frozen[other][j] == 0 and dist(self.pos[other][j], passer) <= self.vision_radius(other, j)]
+                     if self.frozen[other][j] == 0 and (c.vision.ball_always or
+                                                        dist(self.pos[other][j], passer) <= self.vision_radius(other, j))]
         res = pass_interception(passer, target, defenders, c.speeds["pass"],
                                 c.speeds.player, m.intercept_margin)
         if res is not None:
@@ -544,7 +568,8 @@ class FootballEnv:
                 y = float(np.clip(W / 2 + self.rng.normal(0, m.shot_miss_spread), 1.0, W - 1.0))
                 self.ball_pos = to_frame(team, np.array([L - 2.0, y]), L, W)
                 self.ball_state = "loose"
-        return c.reward.w_shot if team == 0 else 0.0
+        # the shot bonus is paid by the chance the shot had: a flat bonus was collected with hopeful shots from range
+        return c.reward.w_shot * float(p) if team == 0 else 0.0
 
     def _in_box(self, team, p) -> bool:
         """Is the world point p inside `team`'s own penalty box (mechanics.goal_kick.box)?"""

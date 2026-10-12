@@ -209,3 +209,186 @@ def test_a_pressed_defender_with_nobody_free_clears_the_ball():
     assert a.kind == Kind.CLEAR and a.arg[0] > 20.0
     env.pos[1][0] = np.array([60.0, 30.0])                         # nobody on him: he does not clear
     assert ctrl._attack_with_ball(build_observation(env, 0, 0)).kind != Kind.CLEAR
+
+
+def _our_kickoff(overrides=None):
+    """Our kick-off against a red team that stands still. Returns the env and our player on the ball."""
+    env = FootballEnv(load_config(overrides=overrides))
+    env.reset(seed=0, start_team=0)
+    env.controllers[1].act = lambda t, obs: {}
+    return env, env.holder[1]
+
+
+def test_progress_is_paid_per_metre_and_going_back_takes_it_away():
+    from football.actions import Action, Kind
+    env, k = _our_kickoff()
+    w, v = env.cfg.reward.w_progress, env.cfg.speeds.dribble
+    fwd, back = (env.space.index_of(Action(Kind.MOVE_DIR, d)) for d in (0, 4))
+    env.step({k: fwd})                                             # the first step with the ball sets the mark
+    paid = [env.step({k: a})[3]["reward_parts"]["shaping"] for a in (fwd, fwd, back, back)]
+    assert np.allclose(paid, [w * v, w * v, -w * v, -w * v]) and abs(sum(paid)) < 1e-12
+
+
+def _parked_ball(overrides=None):
+    """Blue has the ball in its own corner and does not move. Returns the env and the blue player on it."""
+    env = FootballEnv(load_config(overrides=overrides))
+    env.reset(seed=0, start_team=0)
+    k = env.holder[1]
+    env.pos[0][k] = np.array([3.0, 3.0])
+    env.ball_pos = env.pos[0][k].copy()
+    return env, k
+
+
+def test_the_scripted_team_goes_and_gets_a_ball_that_is_parked_deep():
+    env, k = _parked_ball()
+    red, after = env.controllers[1], env.cfg.opponent.hunt.after
+    lost_at = None
+    for t in range(400):
+        env.step({})
+        if env.holder != (0, k):
+            lost_at = t
+            break
+        assert red.hunting == (red.unpressed > after)
+    assert lost_at is not None and lost_at > after                 # left alone at first, then hunted down
+    assert env.holder is not None and env.holder[0] == 1           # ... and red has the ball
+
+
+def test_pure_zonal_defence_leaves_a_parked_ball_alone():
+    env, k = _parked_ball({"opponent.hunt.after": 0})
+    for t in range(400):
+        env.step({})
+    assert env.holder == (0, k) and not env.controllers[1].hunting
+
+
+def _pass_setup(env, k):
+    """Blue's man on the ball at the centre spot, a teammate 20 m behind him, every red player far away.
+    Returns the teammate and the index of the pass to him."""
+    from football.actions import Action, Kind
+    mate = [j for j in range(5) if j != k][0]
+    env.pos[0][k] = np.array([50.0, 30.0])
+    env.ball_pos = env.pos[0][k].copy()
+    env.pos[0][mate] = np.array([30.0, 30.0])
+    env.pos[1][:] = [[90.0, 10.0 + 10 * j] for j in range(5)]
+    return mate, env.space.index_of(Action(Kind.PASS, 0))
+
+
+def test_a_learning_team_is_only_offered_the_passes_it_can_see_are_open():
+    env, k = _our_kickoff()
+    mate, pass_to_mate = _pass_setup(env, k)
+    assert env._obs_out()["mask"][k][pass_to_mate]                 # nobody near the lane
+    env.pos[1][0] = np.array([40.0, 30.0])                         # a red player standing on it
+    assert not env._obs_out()["mask"][k][pass_to_mate]
+    env.pos[1][0] = np.array([40.0, 58.0])                         # ... and well away from it again
+    assert env._obs_out()["mask"][k][pass_to_mate]
+    off = FootballEnv(load_config(overrides={"actions.open_pass.enabled": False}))
+    off.reset(seed=0, start_team=0)
+    mate, pass_to_mate = _pass_setup(off, off.holder[1])
+    off.pos[1][0] = np.array([40.0, 30.0])
+    assert off._obs_out()["mask"][off.holder[1]][pass_to_mate]     # switched off: every pass is offered
+
+
+def test_the_scripted_team_keeps_every_pass_in_its_mask():
+    from football.observation import build_observation
+    env = FootballEnv(load_config(), scripted_ours=True)
+    env.reset(seed=0, start_team=0)
+    k = env.holder[1]
+    mate, pass_to_mate = _pass_setup(env, k)
+    env.pos[1][0] = np.array([40.0, 30.0])
+    assert build_observation(env, 0, k).mask[pass_to_mate]         # it does its own check before passing
+
+
+def test_a_learning_team_meets_a_pass_without_being_asked():
+    from football.actions import Action, Kind
+    env, k = _our_kickoff()
+    mate, pass_to_mate = _pass_setup(env, k)
+    away = env.space.index_of(Action(Kind.MOVE_DIR, 2))            # the receiver wants to walk off sideways ...
+    stay = env.space.index_of(Action(Kind.STAY))
+    obs, _, _, _ = env.step({k: pass_to_mate, mate: away})
+    assert env.ball_state == "flight" and env.flight["designated"] == (0, mate)
+    while env.ball_state == "flight":
+        assert list(np.flatnonzero(obs["mask"][mate])) == [stay]   # ... but while the ball is coming he has no choice
+        obs, _, _, info = env.step({mate: away})
+    assert env.holder == (0, mate) and env.stats["passes_completed"][0] == 1
+    assert env.stats["invalid_actions"][0] == 0
+
+
+def test_one_long_pass_is_paid_for_no_more_than_the_cap():
+    env, k = _our_kickoff()
+    mate, pass_to_mate = _pass_setup(env, k)
+    env.pos[0][k] = np.array([30.0, 30.0])                         # now the pass goes 50 m forward
+    env.ball_pos = env.pos[0][k].copy()
+    env.pos[0][mate] = np.array([80.0, 30.0])
+    env.pos[1][:] = [[5.0, 2.0 + j] for j in range(5)]             # red is behind the passer, too far to cut it out
+    env.step({})                                                   # a step with the ball sets the mark
+    paid = 0.0
+    env.step({k: pass_to_mate})
+    while env.ball_state == "flight":
+        paid += env.step({})[3]["reward_parts"]["shaping"]
+    r = env.cfg.reward
+    assert env.holder == (0, mate) and np.isclose(paid, r.w_progress * r.progress_pass_cap) and r.progress_pass_cap < 50
+
+
+def test_everyone_sees_the_ball_but_not_every_opponent():
+    from football.observation import build_observation
+    env = FootballEnv(load_config(overrides={"vision.radius": 5.0}))
+    env.reset(seed=0)
+    for team in (0, 1):
+        for i in range(5):
+            o = build_observation(env, team, i)
+            assert o.ball_visible and np.allclose(o.ball_pos, to_frame(team, env.ball_pos, env.L, env.W))
+            assert o.opp_visible.sum() < 5 or team == env.holder[0]     # with a 5 m radius hardly any opponent is seen
+    hidden = FootballEnv(load_config(overrides={"vision.radius": 5.0, "vision.ball_always": False}))
+    hidden.reset(seed=0)
+    assert not all(build_observation(hidden, 0, i).ball_visible for i in range(5))
+
+
+def test_a_defender_far_from_the_passer_cuts_out_a_long_ball():
+    env, k = _our_kickoff()
+    env.controllers[1].act = type(env.controllers[1]).act.__get__(env.controllers[1])     # red plays normally here
+    mate, pass_to_mate = _pass_setup(env, k)
+    env.pos[0][k] = np.array([20.0, 30.0])                         # a 60 m ball up the middle
+    env.ball_pos = env.pos[0][k].copy()
+    env.pos[0][mate] = np.array([80.0, 30.0])
+    env.pos[1][:] = [[5.0, 2.0 + j] for j in range(5)]
+    env.pos[1][0] = np.array([70.0, 40.0])                         # one red player 10 m off its path, 50 m from the passer
+    assert dist_far(env, 0, k) > env.cfg.vision.radius             # ... so the passer does not see him, and may pass
+    assert env._obs_out()["mask"][k][pass_to_mate]
+    env.step({k: pass_to_mate})
+    assert env.flight["designated"] == (1, 0) and env.flight["predicted"] == "intercepted"
+    while env.ball_state == "flight":
+        env.step({})
+    assert env.holder == (1, 0)                                    # he walked to its path (the scripted first rule) and took it
+
+
+def dist_far(env, j, k):
+    return float(np.linalg.norm(env.pos[1][j] - env.pos[0][k]))
+
+
+def test_the_scripted_team_closes_the_receiver_down_while_the_pass_is_in_the_air():
+    env, k = _our_kickoff()
+    env.controllers[1].act = type(env.controllers[1]).act.__get__(env.controllers[1])     # red plays normally here
+    mate, pass_to_mate = _pass_setup(env, k)
+    env.pos[0][mate] = np.array([30.0, 30.0])
+    env.pos[1][:] = [[90.0, 2.0 + j] for j in range(5)]
+    env.pos[1][2] = np.array([30.0, 52.0])                         # one red player 22 m to the side of the receiver:
+    start = float(np.linalg.norm(env.pos[1][2] - env.pos[0][mate]))   # too far to cut the pass out, near enough to see him
+    env.step({k: pass_to_mate})
+    assert env.flight["designated"] == (0, mate)
+    while env.ball_state == "flight":
+        env.step({})
+    assert float(np.linalg.norm(env.pos[1][2] - env.pos[0][mate])) < start - 3.0   # he came toward him while it flew
+
+
+def test_a_shot_is_paid_by_its_chance_of_scoring():
+    from football.actions import Action, Kind
+    paid = {}
+    for name, x in (("far", 68.0), ("close", 92.0)):
+        env, k = _our_kickoff()
+        env.pos[1][:] = [[5.0, 2.0 + j] for j in range(5)]         # nobody in the way
+        env.pos[0][k] = np.array([x, 30.0])
+        env.ball_pos = env.pos[0][k].copy()
+        _, _, _, info = env.step({k: env.space.index_of(Action(Kind.SHOOT))})
+        shot = [e for e in info["events"] if e["type"] == "shot"][0]
+        paid[name] = info["reward_parts"]["shaping"]
+        assert shot["p"] > 0 and np.isclose(paid[name], env.cfg.reward.w_shot * shot["p"], atol=1e-9)
+    assert paid["far"] < paid["close"]

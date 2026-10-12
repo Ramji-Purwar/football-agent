@@ -292,14 +292,21 @@ cd football_adapt
 .venv/bin/python -m scripts.pygame_render --mode random --sigma 3 --opp-mode SCHEDULED --fps 15
 .venv/bin/python -m scripts.pygame_render --style aggressive --opp-style defensive
 .venv/bin/python -m scripts.pygame_render --formation 1-3-1 --opp-formation 3-1-1
+.venv/bin/python -m scripts.pygame_render --ckpt runs/stage2_easy_start/ckpt.pt                  # a trained team is blue
+.venv/bin/python -m scripts.pygame_render --ckpt runs/stage2_easy_start/ckpt.pt --opp-eps 0.45   # against the weakened opponent
 ```
+
+Without a display (a remote node), `scripts.watch_match` takes the same `--ckpt` and `--opp-eps` and writes a GIF:
+`python -m scripts.watch_match --ckpt runs/stage2_easy_start/ckpt.pt --T 1200 --out trained.gif`.
 
 Flags:
 
 | Flag | Default | Effect |
 |---|---|---|
 | `--mode` | `scripted` | `scripted` = both teams heuristic; `random` = our team random |
-| `--T` | 1200 | Match length in steps |
+| `--ckpt` | none | A trained team (`runs/<name>/ckpt.pt`) plays blue instead of `--mode`. It gets the match length, vision radius, structure level and formation it was trained with, unless the flags say otherwise. Needs torch |
+| `--opp-eps` | cfg default (0) | Red players act at random this often (0 to 1): the weakened opponent of the easy start in `training.md`, Section 7 |
+| `--T` | 1200 | Match length in steps (with `--ckpt`: as in training) |
 | `--fps` | 20 | Starting FPS |
 | `--radius` | cfg default | Override vision radius |
 | `--sigma` | 0 | Playmaker player number (1–5) |

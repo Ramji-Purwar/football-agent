@@ -37,11 +37,12 @@ football-agent/
 │   │   ├── __init__.py            # Exports: RandomAgent
 │   │   ├── random_agent.py        # RandomAgent: uniform random over valid actions
 │   │   ├── belief_filter.py       # BeliefFilter: Bayesian formation inference (skeleton)
-│   │   └── mappo.py               # MAPPO actor/critic (skeleton)
+│   │   └── mappo.py               # MAPPO actor (MLP or GRU), critic, MAPPOAgent (needs torch)
 │   │
 │   ├── training/
 │   │   ├── __init__.py
-│   │   └── train.py               # Training loop (skeleton)
+│   │   ├── train.py               # One training run: rollouts, PPO update, evaluation, checkpoints, resume
+│   │   └── sweep.py               # A grid of training runs side by side, one core each
 │   │
 │   ├── tests/
 │   │   ├── __init__.py
@@ -383,9 +384,20 @@ belief = bf.update(obs_by_player)
 
 The belief filter is documented in full in `agents.md`.
 
-### `agents/mappo.py` — MAPPO (skeleton)
+### `agents/mappo.py` — MAPPO
 
-See `training.md` for the full training protocol and implementation guide.
+```python
+from agents.mappo import Actor, Critic, MAPPOAgent
+
+actor = Actor(obs_dim=79, n_actions=23, hidden=256, recurrent=False)   # recurrent=True: encoder + GRU
+critic = Critic(state_dim=51, hidden=256)
+agent = MAPPOAgent.load("runs/<name>/ckpt.pt")    # a trained team behind the same act(obs) as RandomAgent
+agent.reset()                                     # at every kick-off (clears the GRU state)
+actions = agent.act(obs)
+```
+
+Not imported from `agents/__init__.py`, so the game and the tests run without torch. The trainer is
+`training/train.py`; see `training.md`, Section 0 for how to run it.
 
 ---
 

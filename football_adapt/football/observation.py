@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import numpy as np
 from .actions import Kind
-from .geometry import dist, to_frame
-from .mechanics import control_rating
+from .geometry import dist, to_frame, closest_point_on_segment
+from .mechanics import control_rating, pass_interception
 
 OWN, OTHER, LOOSE = 0, 1, 2   # possession from the observer's point of view
 
@@ -40,10 +40,29 @@ class Obs:
     prev_action: int = -1
 
 
+def open_pass(env, team: int, a, b, opp_visible) -> bool:
+    """Can the pass a -> b (world frame) be played without a defender the passer SEES getting to the ball?
+
+    The same two tests the scripted team makes before it passes: no visible defender intercepts even with
+    `slack` extra steps in hand, and none is within `lane` m of the cut-out radius of the ball's path (the first
+    metres next to the passer do not count). A defender the passer cannot see can still take the ball."""
+    op, m, sp = env.cfg.actions.open_pass, env.cfg.mechanics, env.cfg.speeds
+    defs = [(j, env.pos[1 - team][j]) for j in range(5) if opp_visible[j]]
+    if not defs:
+        return True
+    if pass_interception(a, b, defs, sp["pass"], sp.player, m.intercept_margin + op.slack) is not None:
+        return False
+    fc, n = m.flight_cut, dist(a, b)
+    if n <= fc.free or fc.radius <= 0:
+        return True
+    start = a + (b - a) * (fc.free / n)
+    return all(dist(d, closest_point_on_segment(d, start, b)) > fc.radius + op.lane for _, d in defs)
+
+
 def compute_mask(env, team: int, idx: int, obs_partial: dict) -> np.ndarray:
     sp = env.space
     m = np.zeros(sp.n, bool)
-    if obs_partial["frozen"]:
+    if obs_partial["frozen"] or obs_partial["receiving"]:      # nothing to choose: frozen, or meeting a pass (env.step)
         m[sp.index_of_kind(Kind.STAY)] = True
         return m
     cfg = env.cfg.mechanics
@@ -57,8 +76,14 @@ def compute_mask(env, team: int, idx: int, obs_partial: dict) -> np.ndarray:
             ok = obs_partial["anchor"] is not None
         elif k == Kind.GO_TO_BALL:
             ok = obs_partial["ball_visible"]
-        elif k in (Kind.PASS, Kind.DRIBBLE_GOAL):
+        elif k == Kind.DRIBBLE_GOAL:
             ok = has_ball
+        elif k == Kind.PASS:
+            ok = has_ball
+            # a learning team is only offered the passes it can see are open (the scripted team checks for itself)
+            if ok and env.cfg.actions.open_pass.enabled and env.controllers.get(team) is None:
+                mate = [j for j in range(5) if j != idx][a.arg]
+                ok = open_pass(env, team, env.pos[team][idx], env.pos[team][mate], obs_partial["opp_visible"])
         elif k == Kind.SHOOT:
             ok = has_ball and obs_partial["in_shoot_zone"]
         elif k == Kind.TACKLE:
@@ -89,7 +114,8 @@ def build_observation(env, team: int, idx: int) -> Obs:
             opp_pos[j] = to_frame(team, env.pos[other][j], L, W)
             opp_vis[j] = True
 
-    ball_vis = bool(dist(env.ball_pos, me_w) <= rho) or env.holder == (team, idx)
+    # everyone knows where the ball is (vision.ball_always); the radius hides opponents only
+    ball_vis = env.cfg.vision.ball_always or bool(dist(env.ball_pos, me_w) <= rho) or env.holder == (team, idx)
     ball_pos = to_frame(team, env.ball_pos, L, W) if ball_vis else np.zeros(2)
 
     if env.holder is None:
@@ -108,8 +134,12 @@ def build_observation(env, team: int, idx: int) -> Obs:
                  env.steal_chain < env.cfg.mechanics.max_steal_chain and
                  dist(env.pos[other][env.holder[1]], me_w) <= env.cfg.mechanics.tackle_dist)
 
+    incoming = None
+    if env.ball_state == "flight" and env.flight is not None and env.flight["designated"] == (team, idx):
+        incoming = to_frame(team, env.flight["end"], L, W)
     partial = dict(frozen=frozen, has_ball=has_ball, anchor=anchor, ball_visible=ball_vis,
-                   in_shoot_zone=in_zone, opp_carrier_close=opp_close, opp_visible=opp_vis)
+                   in_shoot_zone=in_zone, opp_carrier_close=opp_close, opp_visible=opp_vis,
+                   receiving=incoming is not None and env.controllers.get(team) is None)
     o = Obs(team=team, idx=idx, pos=me, anchor=anchor, control=ctrl, has_ball=has_ball, frozen=frozen,
             teammate_ids=tids, teammate_pos=tm_pos, teammate_has_ball=tm_has,
             opp_pos=opp_pos, opp_visible=opp_vis, ball_pos=ball_pos, ball_visible=ball_vis,
@@ -118,8 +148,7 @@ def build_observation(env, team: int, idx: int) -> Obs:
             slot_type=env.book[env.formation[team]].slot_types[idx], radius=rho,
             prev_action=int(env.prev_action[team][idx]))
     o.mask = compute_mask(env, team, idx, partial)
-    if env.ball_state == "flight" and env.flight is not None and env.flight["designated"] == (team, idx):
-        o.incoming = to_frame(team, env.flight["end"], L, W)
+    o.incoming = incoming
     return o
 
 

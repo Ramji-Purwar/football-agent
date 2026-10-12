@@ -8,6 +8,8 @@ Run from football_adapt/:
     .venv/bin/python -m scripts.pygame_render --mode random --sigma 3 --opp-mode SCHEDULED
     .venv/bin/python -m scripts.pygame_render --style aggressive --opp-style defensive
     .venv/bin/python -m scripts.pygame_render --formation 1-3-1 --opp-formation 3-1-1
+    .venv/bin/python -m scripts.pygame_render --ckpt runs/stage2_easy_start/ckpt.pt            # a trained team is blue
+    .venv/bin/python -m scripts.pygame_render --ckpt runs/stage2_easy_start/ckpt.pt --opp-eps 0.45
 
 Keys: Space pause, Right step, Up/Down speed, R new match (random seed), Shift+R replay, Z / X next play style
 for blue / red, N / M next formation for blue / red, V vision, A anchors, F formations, 1-5 highlight, Q quit.
@@ -721,7 +723,7 @@ def draw_full_time(screen: pygame.Surface, env: FootballEnv):
 def main():
     ap = argparse.ArgumentParser(description="Top-down 2D Pygame renderer")
     ap.add_argument("--mode",     choices=["random", "scripted"], default="scripted")
-    ap.add_argument("--T",        type=int,   default=1200)
+    ap.add_argument("--T",        type=int,   default=None, help="match length (default: 1200, or as the --ckpt team was trained)")
     ap.add_argument("--fps",      type=int,   default=20)
     ap.add_argument("--radius",   type=float, default=None)
     ap.add_argument("--sigma",    type=int,   default=0)
@@ -734,20 +736,34 @@ def main():
     ap.add_argument("--formation",     choices=forms, default=None, help="formation of the blue team (default: config)")
     ap.add_argument("--opp-formation", choices=forms, default=None, help="formation of the red team (default: config)")
     ap.add_argument("--no-anchors", action="store_true")
+    ap.add_argument("--ckpt", default=None,
+                    help="a trained team (runs/<name>/ckpt.pt) plays blue, in the setting it was trained in")
+    ap.add_argument("--opp-eps", type=float, default=None,
+                    help="red players act at random this often, 0..1 (the weakened opponent of the easy start)")
     args = ap.parse_args()
 
-    overrides = {"time.T": args.T, "opponent.switching.mode": args.opp_mode}
+    ag, trained = (RandomAgent(args.seed) if args.mode == "random" else None), {}
+    if args.ckpt:                                  # same match length, vision, structure level and formation as in training
+        from agents.mappo import MAPPOAgent        # needs torch, so it is imported only when asked for
+        ag = MAPPOAgent.load(args.ckpt, seed=args.seed)
+        t = ag.train_args
+        args.T, args.formation = args.T or t.get("T"), args.formation or t.get("our_formation")
+        trained = dict(zeta=t.get("zeta"), radius=None if args.radius else t.get("radius"))
+
+    overrides = {"time.T": args.T or 1200, "opponent.switching.mode": args.opp_mode}
     if args.radius:
         overrides["vision.radius"] = args.radius
+    if args.opp_eps is not None:
+        overrides["opponent.randomness.eps_opp"] = args.opp_eps
     cfg  = load_config(overrides=overrides)
-    env  = FootballEnv(cfg, scripted_ours=(args.mode == "scripted"))
+    env  = FootballEnv(cfg, scripted_ours=(ag is None))
     style = [args.style or cfg.styles.ours, args.opp_style or cfg.styles.opponent]   # blue, red (Z / X change them)
     formation = [args.formation or cfg.formations.ours, args.opp_formation or cfg.formations.opponent]   # N / M
-    ag   = RandomAgent(args.seed) if args.mode == "random" else None
+    who  = f", blue = {os.path.basename(os.path.dirname(os.path.abspath(args.ckpt)))}" if args.ckpt else ""
 
     pygame.init()
     _ft.init()   # initialise the C-level freetype engine
-    pygame.display.set_caption(f"Football Agent — Top-down 2D (seed {args.seed})")
+    pygame.display.set_caption(f"Football Agent — Top-down 2D (seed {args.seed}{who})")
     screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.RESIZABLE)
     set_layout(WIN_W, WIN_H, env.L, env.W)   # after set_mode so convert_alpha() works when fonts render
     clock  = pygame.time.Clock()
@@ -771,7 +787,9 @@ def main():
         shot_anim = None
         match_over_flashed = False
         obs, _ = env.reset(seed=s, sigma=args.sigma, our_style=style[0], opp_style=style[1],
-                           our_formation=formation[0], opp_formation=formation[1])
+                           our_formation=formation[0], opp_formation=formation[1], **trained)
+        if args.ckpt:
+            ag.reset(s)
         # Start with a 3-2-1 countdown before the first kick
         goal_pause_remaining = GOAL_PAUSE_FRAMES
         kicking_off_team     = env.holder[0] if env.holder else 0
@@ -811,7 +829,7 @@ def main():
                     obs = do_reset(seed)
                     bg  = build_background(env)
                     paused = False
-                    pygame.display.set_caption(f"Football Agent — Top-down 2D (seed {seed})")
+                    pygame.display.set_caption(f"Football Agent — Top-down 2D (seed {seed}{who})")
                 elif k in (pygame.K_z, pygame.K_x):        # Z / X = next play style for blue / red, mid-match
                     team = 0 if k == pygame.K_z else 1
                     style[team] = styles[(styles.index(style[team]) + 1) % len(styles)]

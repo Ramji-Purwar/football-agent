@@ -4,6 +4,8 @@ Rules of the road:
   * It receives ONLY observations (built by the shared observation function), never the full env state.
   * Everything is in the team frame (the team attacks toward +x).
   * Priority list per player: transition walk, ball carrier, support, loose ball, zonal defence.
+  * Zonal defence does not mean the other team may sit on the ball: after a while the nearest players go and
+    get it wherever it is (cfg.opponent.hunt).
   * No man-marking (one exception: cutting passing lanes, cfg.opponent.lanes, used by the aggressive style).
     No learning. Deterministic given the seed (separate random stream).
 """
@@ -42,6 +44,9 @@ class ScriptedTeam:
         self.mover = None                   # the player who just passed and is now running on (pass and move)
         self.mover_timer = 0
         self.poss_steps = 0                 # how long the team has kept the ball without a break (see patience)
+        self.prev_ball = None               # where the team saw the ball on the last step (to tell where a pass is going)
+        self.unpressed = 0                  # steps of the other team's possession with none of us on the ball (see hunt)
+        self.hunting = False                # they sat on it for too long: the nearest players are going to get it
         self._lanes = {}                    # passing lanes cut on the last step: {player: point} (see lanes)
         self._tackle_idx = ActionSpace(cfg.actions.n_directions).index_of_kind(Kind.TACKLE)
 
@@ -65,6 +70,7 @@ class ScriptedTeam:
         self.pt = cfg.opponent.patience
         self.ln = cfg.opponent.lanes
         self.cl = cfg.opponent.clear
+        self.hu = cfg.opponent.hunt
         self.eps_opp = cfg.opponent.randomness.eps_opp
         self.m = cfg.mechanics
         self.v_pl, self.v_pa = cfg.speeds.player, cfg.speeds["pass"]
@@ -180,8 +186,62 @@ class ScriptedTeam:
                 chasers = sorted((j for j in seers if j not in lanes),
                                  key=lambda j: (dist(pos[j], ball), j))[:self.mv.counter_press.n]
         self._lanes = lanes                                          # kept for inspection (tests, viewer)
+        # hunt: the other team keeps the ball where no zone of ours reaches it. Those steps are counted over one
+        # possession of theirs (passing it around does not reset the count). Past hunt.after we go and get it,
+        # and keep at it until we have the ball again.
+        if poss == OWN:
+            self.unpressed, self.hunting = 0, False
+        elif poss == OTHER and self.hu.after > 0 and not self.hunting and presser is None and not chasers:
+            self.unpressed += 1
+            self.hunting = self.unpressed > self.hu.after
+        hunters = self._hunters(pos, ball) if self.hunting else {}
+        closer = self._close_down(obs, pos, ball) if poss == LOOSE and self.last_poss == OTHER else None
+        self.prev_ball = ball
         return dict(pos=pos, anchors=anchors, ball=ball, poss=poss, presser=presser, nearest=nearest, cover=cover,
-                    chasers=chasers, presser2=presser2, lanes=lanes)
+                    chasers=chasers, presser2=presser2, lanes=lanes, hunters=hunters, closer=closer)
+
+    def _close_down(self, obs, pos, ball):
+        """Their pass is in the air: (player, point) for the one of us who goes to meet the receiver, or None.
+
+        The ball's last two sightings give its line. The receiver is the opponent we see nearest to that line, ahead
+        of the ball and within close_down.lane m of it; if we see none, we go to a point close_down.lead m ahead of
+        the ball. The player nearest to that spot goes (not one who is already running to intercept the pass)."""
+        cd = self.mv.close_down
+        if not cd.enabled or ball is None or self.prev_ball is None:
+            return None
+        v = ball - self.prev_ball
+        speed = float(np.hypot(*v))
+        if speed <= 1.5 * self.v_pl:                                 # not a pass: the ball is lying still or being carried
+            return None
+        v = v / speed
+        best = None
+        for o in obs.values():
+            for k in range(5):
+                if o.opp_visible[k]:
+                    r = o.opp_pos[k] - ball
+                    along = float(r @ v)
+                    off = float(abs(r[0] * v[1] - r[1] * v[0]))
+                    if along > 0 and off <= cd.lane and (best is None or off < best[0]):
+                        best = (off, o.opp_pos[k])
+        spot = best[1] if best is not None else np.clip(ball + cd.lead * v, [0.0, 0.0], [self.L, self.W])
+        free = [j for j, o in obs.items() if o.incoming is None]
+        if not free:
+            return None
+        return min(free, key=lambda j: (dist(pos[j], spot), j)), spot
+
+    def _hunters(self, pos, ball):
+        """Who goes after a ball the other team is sitting on, and where to: {player: point}.
+
+        With a sighting (anyone's: teammates call it) the hunt.n nearest players go to the ball. Without one they
+        go and look for it where it must be, near the goal we attack: hunt.depth m out from the goal line and
+        spread hunt.wide m either side of the goal centre, so that between them they see the whole end of the pitch."""
+        n = self.hu.n
+        if ball is not None:
+            return {j: ball for j in sorted(range(5), key=lambda j: (dist(pos[j], ball), j))[:n]}
+        up = sorted(range(5), key=lambda j: (dist(pos[j], self.goal), j))[:n]
+        ys = np.linspace(-self.hu.wide, self.hu.wide, n) if n > 1 else np.zeros(1)
+        return {j: np.array([self.L - self.hu.depth, self.W / 2 + y])
+                for j, y in zip(sorted(up, key=lambda j: (pos[j][1], j)), ys)}
 
     def _assign_lanes(self, obs, ball, presser):
         """Who cuts which passing lane while the other team has the ball: {player: point to stand on}.
@@ -242,6 +302,10 @@ class ScriptedTeam:
             if o.mask[self._tackle_idx] and o.possession == OTHER:
                 return Action(Kind.TACKLE)
             return MOVE_TO(ball)
+        if j in ctx["hunters"]:                                      # they are sitting on the ball: go and get it
+            if o.mask[self._tackle_idx] and o.possession == OTHER:
+                return Action(Kind.TACKLE)
+            return MOVE_TO(ctx["hunters"][j])
         if j in ctx["lanes"]:                                        # stand on the passing lane I was given
             if o.mask[self._tackle_idx] and o.possession == OTHER:   # (the carrier ran into me: take it off him)
                 return Action(Kind.TACKLE)
@@ -254,6 +318,8 @@ class ScriptedTeam:
         return MOVE_TO(anchor + self.z.omega * clip_norm(ball - anchor, self.z.r_zone))  # small ball-side drift
 
     def _loose_ball(self, j, o, ctx):
+        if ctx["closer"] is not None and ctx["closer"][0] == j:      # their pass is on its way: meet the receiver
+            return MOVE_TO(ctx["closer"][1])
         if o.ball_visible and ctx["nearest"] == j:
             return MOVE_TO(o.ball_pos)
         if self.last_poss == OWN and o.ball_visible:                 # our own pass is on its way: keep supporting,
