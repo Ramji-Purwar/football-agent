@@ -42,7 +42,9 @@ football-agent/
 │   ├── training/
 │   │   ├── __init__.py
 │   │   ├── train.py               # One training run: rollouts, PPO update, evaluation, checkpoints, resume
-│   │   └── sweep.py               # A grid of training runs side by side, one core each
+│   │   ├── sweep.py               # A grid of training runs side by side, one core each
+│   │   ├── rules.py               # A team played by a few hand-written rules over the learner's own 23 actions
+│   │   └── pretrain.py            # Rule-based start: an actor and a critic that begin as a copy of rules.py
 │   │
 │   ├── tests/
 │   │   ├── __init__.py

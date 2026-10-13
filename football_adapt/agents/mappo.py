@@ -80,6 +80,7 @@ class MAPPOAgent:
         actor.load_state_dict(ck["actor"])
         agent = cls(actor, seed, greedy)
         agent.train_args = ck["args"]            # the setting it was trained in: T, radius, zeta, our_formation, ...
+        agent.overrides = ck.get("overrides") or {}   # ... and the config values it was trained with (--set)
         return agent
 
     def reset(self, seed=None):

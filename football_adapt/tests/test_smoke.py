@@ -211,6 +211,9 @@ def test_a_pressed_defender_with_nobody_free_clears_the_ball():
     assert ctrl._attack_with_ball(build_observation(env, 0, 0)).kind != Kind.CLEAR
 
 
+ONE_TERM = {"reward.w_formation": 0.0}       # for tests that check one shaping term: the per-step formation pay is off
+
+
 def _our_kickoff(overrides=None):
     """Our kick-off against a red team that stands still. Returns the env and our player on the ball."""
     env = FootballEnv(load_config(overrides=overrides))
@@ -221,7 +224,7 @@ def _our_kickoff(overrides=None):
 
 def test_progress_is_paid_per_metre_and_going_back_takes_it_away():
     from football.actions import Action, Kind
-    env, k = _our_kickoff()
+    env, k = _our_kickoff(ONE_TERM)
     w, v = env.cfg.reward.w_progress, env.cfg.speeds.dribble
     fwd, back = (env.space.index_of(Action(Kind.MOVE_DIR, d)) for d in (0, 4))
     env.step({k: fwd})                                             # the first step with the ball sets the mark
@@ -313,7 +316,7 @@ def test_a_learning_team_meets_a_pass_without_being_asked():
 
 
 def test_one_long_pass_is_paid_for_no_more_than_the_cap():
-    env, k = _our_kickoff()
+    env, k = _our_kickoff(ONE_TERM)
     mate, pass_to_mate = _pass_setup(env, k)
     env.pos[0][k] = np.array([30.0, 30.0])                         # now the pass goes 50 m forward
     env.ball_pos = env.pos[0][k].copy()
@@ -383,7 +386,7 @@ def test_a_shot_is_paid_by_its_chance_of_scoring():
     from football.actions import Action, Kind
     paid = {}
     for name, x in (("far", 68.0), ("close", 92.0)):
-        env, k = _our_kickoff()
+        env, k = _our_kickoff(ONE_TERM)
         env.pos[1][:] = [[5.0, 2.0 + j] for j in range(5)]         # nobody in the way
         env.pos[0][k] = np.array([x, 30.0])
         env.ball_pos = env.pos[0][k].copy()
@@ -392,3 +395,100 @@ def test_a_shot_is_paid_by_its_chance_of_scoring():
         paid[name] = info["reward_parts"]["shaping"]
         assert shot["p"] > 0 and np.isclose(paid[name], env.cfg.reward.w_shot * shot["p"], atol=1e-9)
     assert paid["far"] < paid["close"]
+    # a big chance earns w_big_chance on top, a shot from far out does not
+    for x, big in ((68.0, False), (92.0, True)):
+        env, k = _our_kickoff({**ONE_TERM, "reward.w_big_chance": 0.2})
+        env.pos[1][:] = [[5.0, 2.0 + j] for j in range(5)]
+        env.pos[0][k] = np.array([x, 30.0])
+        env.ball_pos = env.pos[0][k].copy()
+        _, _, _, info = env.step({k: env.space.index_of(Action(Kind.SHOOT))})
+        p = [e for e in info["events"] if e["type"] == "shot"][0]["p"]
+        assert (p >= env.cfg.reward.big_chance) == big
+        assert np.isclose(info["reward_parts"]["shaping"], env.cfg.reward.w_shot * p + (0.2 if big else 0.0), atol=1e-9)
+
+
+def test_hold_shape_takes_a_learning_player_to_where_a_scripted_player_would_stand():
+    from football.actions import Kind
+    from football.geometry import move_toward
+    from football.observation import build_observation
+    env = FootballEnv(load_config())
+    env.reset(seed=0, start_team=1)
+    hold = {i: env.space.index_of_kind(Kind.HOLD_SHAPE) for i in range(5)}
+    v, g = env.cfg.speeds.player, env.shape_guide
+    before = env.pos[0].copy()
+    env.step(hold)
+    spots = np.array([g.shape_spot(i) for i in range(5)])
+    assert np.allclose(env.pos[0], [move_toward(before[i], spots[i], v) for i in range(5)])
+    assert not np.allclose(spots, env.anchors[0])                  # not the bare anchors: already leaning toward the ball
+    # red keeps the ball out on one wing: the spots slide across to that side, as the scripted team's shape does
+    env.holder, env.ball_state = (1, 0), "held"
+    env.pos[1][0] = np.array([25.0, 50.0])
+    env.ball_pos = env.pos[1][0].copy()
+    for _ in range(60):
+        g.watch({i: build_observation(env, 0, i) for i in range(5)})
+    wing = np.array([g.shape_spot(i) for i in range(5)])
+    assert wing[:, 1].mean() > env.anchors[0][:, 1].mean() + 1.0
+    # switched off: the bare anchor, and the scripted red team never has a guide
+    off = FootballEnv(load_config(overrides={"actions.shape_guide": False}))
+    off.reset(seed=0, start_team=1)
+    before = off.pos[0].copy()
+    off.step(hold)
+    assert off.shape_guide is None
+    assert np.allclose(off.pos[0], [move_toward(before[i], off.anchors[0][i], v) for i in range(5)])
+    both = FootballEnv(load_config(), scripted_ours=True)
+    both.reset(seed=0)
+    assert both.shape_guide is None
+
+
+def test_the_team_is_paid_for_standing_on_its_hold_shape_spots():
+    from football.geometry import to_frame
+    def pay(move, overrides=None):
+        env, k = _our_kickoff(overrides)
+        g = env.shape_guide
+        if g is not None:
+            env.step({})                                           # one step, so that the guide has seen the team
+        for j in range(5):
+            if j != k and g is not None:
+                env.pos[0][j] = to_frame(0, g.shape_spot(j), env.L, env.W) + move(j)
+        return env.step({})[3]["reward_parts"]["shaping"], env.cfg.reward
+    on_spot, r = pay(lambda j: np.zeros(2))
+    assert 0.9 * r.w_formation < on_spot <= r.w_formation           # all four on their spots: (nearly) all of it
+    off_spot, _ = pay(lambda j: np.array([-r.formation_dist, 0.0]))
+    assert off_spot < 0.5 * on_spot                                # all four formation_dist m away: about a third
+    one_off, _ = pay(lambda j: np.array([-40.0, 0.0]) if j == [i for i in range(5) if i != 0][0] else np.zeros(2))
+    assert off_spot < one_off < on_spot
+    assert pay(lambda j: np.zeros(2), ONE_TERM)[0] == 0.0          # switched off
+    assert pay(lambda j: np.zeros(2), {"actions.shape_guide": False})[0] == 0.0   # no spots to stand on
+
+
+def test_context_mask_offers_a_learning_player_only_the_choices_of_his_situation():
+    from football.actions import Kind
+    from football.observation import build_observation
+    def kinds(mask):
+        return {env.space.decode(i).kind for i in np.flatnonzero(mask)}
+    env, k = _our_kickoff({"actions.context_mask": True})
+    mate = [j for j in range(5) if j != k][0]
+    mask = env._obs_out()["mask"]
+    assert {Kind.MOVE_DIR, Kind.DRIBBLE_GOAL} <= kinds(mask[k]) <= {Kind.MOVE_DIR, Kind.STAY, Kind.PASS, Kind.DRIBBLE_GOAL, Kind.SHOOT}
+    assert {Kind.STAY, Kind.HOLD_SHAPE, Kind.GO_TO_BALL} <= kinds(mask[mate]) and Kind.MOVE_DIR not in kinds(mask[mate])
+    env, k = _our_kickoff()                                        # switched off: every valid action
+    mask = env._obs_out()["mask"]
+    assert {Kind.HOLD_SHAPE, Kind.GO_TO_BALL} <= kinds(mask[k]) and Kind.MOVE_DIR in kinds(mask[mate])
+    env = FootballEnv(load_config(overrides={"actions.context_mask": True}), scripted_ours=True)
+    env.reset(seed=0, start_team=0)                                # ... and a scripted team keeps all of them too
+    assert Kind.MOVE_DIR in kinds(build_observation(env, 0, mate).mask)
+
+
+def test_the_rule_based_team_presses_with_two_and_only_makes_choices_its_mask_offers():
+    from football.actions import Kind
+    from training.rules import rule_actions
+    for overrides in (None, {"actions.context_mask": True}):
+        env = FootballEnv(load_config(overrides=overrides))
+        obs, _ = env.reset(seed=0, start_team=1)
+        chosen = [env.space.decode(a).kind for a in rule_actions(env).values()]
+        assert chosen.count(Kind.GO_TO_BALL) == 2 and chosen.count(Kind.HOLD_SHAPE) == 3     # red has the ball
+        for _ in range(300):
+            acts = rule_actions(env)
+            assert all(obs["mask"][j][acts[j]] for j in range(5))
+            obs, _, _, _ = env.step(acts)
+        assert env.stats["invalid_actions"][0] == 0 and env.stats["shots"][0] + env.stats["passes"][0] > 0

@@ -742,15 +742,16 @@ def main():
                     help="red players act at random this often, 0..1 (the weakened opponent of the easy start)")
     args = ap.parse_args()
 
-    ag, trained = (RandomAgent(args.seed) if args.mode == "random" else None), {}
+    ag, trained, trained_cfg = (RandomAgent(args.seed) if args.mode == "random" else None), {}, {}
     if args.ckpt:                                  # same match length, vision, structure level and formation as in training
         from agents.mappo import MAPPOAgent        # needs torch, so it is imported only when asked for
         ag = MAPPOAgent.load(args.ckpt, seed=args.seed)
         t = ag.train_args
         args.T, args.formation = args.T or t.get("T"), args.formation or t.get("our_formation")
         trained = dict(zeta=t.get("zeta"), radius=None if args.radius else t.get("radius"))
+        trained_cfg = ag.overrides                 # ... and the same config values (the trainer's --set)
 
-    overrides = {"time.T": args.T or 1200, "opponent.switching.mode": args.opp_mode}
+    overrides = {**trained_cfg, "time.T": args.T or 1200, "opponent.switching.mode": args.opp_mode}
     if args.radius:
         overrides["vision.radius"] = args.radius
     if args.opp_eps is not None:

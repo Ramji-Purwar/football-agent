@@ -58,15 +58,16 @@ def main():
     ap.add_argument("--opp-eps", type=float, default=None,
                     help="red players act at random this often, 0..1 (the weakened opponent of the easy start)")
     a = ap.parse_args()
-    cfg = load_config(overrides={"time.T": a.T, "opponent.switching.mode": a.opp_mode,
-                                 **({"vision.radius": a.radius} if a.radius else {}),
-                                 **({"opponent.randomness.eps_opp": a.opp_eps} if a.opp_eps is not None else {})})
-    ag, trained = (RandomAgent(a.seed) if a.mode == "random" else None), {}
+    ag, trained, trained_cfg = (RandomAgent(a.seed) if a.mode == "random" else None), {}, {}
     if a.ckpt:
         from agents.mappo import MAPPOAgent        # needs torch, so it is imported only when asked for
         ag = MAPPOAgent.load(a.ckpt, seed=a.seed)
         t = ag.train_args
         trained = dict(zeta=t.get("zeta"), radius=None if a.radius else t.get("radius"), our_formation=t.get("our_formation"))
+        trained_cfg = ag.overrides                 # the config values it was trained with (the trainer's --set)
+    cfg = load_config(overrides={**trained_cfg, "time.T": a.T, "opponent.switching.mode": a.opp_mode,
+                                 **({"vision.radius": a.radius} if a.radius else {}),
+                                 **({"opponent.randomness.eps_opp": a.opp_eps} if a.opp_eps is not None else {})})
     env = FootballEnv(cfg, scripted_ours=(ag is None))
     obs, _ = env.reset(seed=a.seed, sigma=a.sigma, **trained)
     frames = []

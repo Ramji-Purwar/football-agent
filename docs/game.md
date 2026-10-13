@@ -161,6 +161,8 @@ Total action count with `D=8` directions: **23 actions**.
 Notes:
 - **`SHADOW_j`** is for our learned team only. The opponent does not use it.
 - `HOLD_SHAPE`, `GO_TO_BALL`, `DRIBBLE_GOAL`, `SHADOW_j` are macros built on `MOVE_TO(point)`.
+- **`HOLD_SHAPE` for a learning team** (`actions.shape_guide: true`) takes the player to the spot a scripted player would hold, not to the bare anchor: his home position, which slides across with the ball and leans toward it, and his supporting spot while a teammate has the ball or our pass is in the air (`opponent.md`, zonal defence and support). Going for the ball, tackling and cover are not part of it: the team decides those itself. The spot is worked out from the player's own observation, so the vision limit holds. The control rating (Section 5) is still measured from the anchor. With `shape_guide: false`, and for a scripted team that picks the action at random, `HOLD_SHAPE` goes to the anchor.
+- **Choices by situation** (`actions.context_mask`, off by default). With it a learning player is offered only the choices that belong to his situation, on top of the conditions in the table. Off the ball: `STAY`, `HOLD_SHAPE`, `GO_TO_BALL`, `TACKLE` and `SHADOW_j`, not the 8 directions. On the ball: the directions, `STAY`, `PASS_k`, `DRIBBLE_GOAL` and `SHOOT`. A new policy spreads its choices over the 8 directions, and its players off the ball wander (`training.md`, Section 7). The scripted team always keeps every valid action.
 - `PASS_k` where `k=0..3` maps to the 4 teammates in ascending player index order (self excluded).
 - Invalid actions are masked: the policy cannot select them, but if the raw integer arrives, the env replaces it with `STAY`.
 - A frozen player, and a player of a learning team who has a pass on its way to him, has only `STAY` in his mask. The second one is not standing still: the game walks him to where the ball lands (Section 8.2).
@@ -287,9 +289,11 @@ R_t = R_team + lambda_t * phi(state, actions) + [t == T] * ETA * sign(goal_diffe
 | `w_pass` | 0 (off) | Completed pass (scaled by forward advancement). Off because it was farmed, see below |
 | `w_tackle` | +0.02 | Successful tackle by our team |
 | `w_shot` | +0.02 × chance | Shot by our team, paid by its chance of scoring (a flat bonus was collected with hopeful shots from 33 m) |
+| `w_big_chance` | 0 (off) | Extra for a shot taken at a chance of `big_chance` = 0.3 or better, whether it goes in or not. Pays for creating a big chance; a shot from far out earns none of it |
 | `w_turnover` | -0.02 | Turnover (pass intercepted by opponent) |
 | `w_progress` | +0.002 per m | The ball moves toward their goal while we keep it (moving back = minus) |
 | `progress_pass_cap` | 20 m | The most progress one pass is paid for |
+| `w_formation` | +0.002 per step × fit | Our players stand on their `HOLD_SHAPE` spots (Section 7). Fit is the mean over four players of `exp(-(d / formation_dist)^2)`, `d` = distance from the spot, `formation_dist` = 15 m: 1 on the spot, 0.64 at 10 m, 0.37 at 15 m. The player nearest the ball is not counted, so going for the ball costs nothing. Needs `actions.shape_guide`. At most 2.4 a match |
 | `shape_cap` | 5.0 | Maximum total `|shaping|` per episode |
 | `shaping_weight` | 1.0 → 0 | Annealed during training |
 
@@ -473,6 +477,8 @@ vision:  {radius: 25.0, ball_always: true}
 actions:
   n_directions: 8
   open_pass: {enabled: true, slack: 1.5, lane: 1.5}
+  shape_guide: true
+  context_mask: false
 
 mechanics:
   tackle_dist: 2.0
@@ -495,6 +501,8 @@ reward:
   w_pass: 0.0
   w_tackle: 0.02
   w_shot: 0.02
+  w_big_chance: 0.0
+  big_chance: 0.3
   w_turnover: -0.02
   w_progress: 0.002
   progress_pass_cap: 20.0

@@ -20,6 +20,14 @@ actions:
   # interception rule with `slack` extra steps in hand, and not by standing within `lane` m of the cut-out radius of
   # the ball's path. It is the test the scripted team makes before it passes. enabled: false = every pass is offered.
   open_pass: {enabled: true, slack: 1.5, lane: 1.5}
+  # HOLD_SHAPE for a learning team sends the player to the spot a scripted player would hold: his home position, which
+  # moves up, drops back and slides across with the ball as the scripted team's block does, and his supporting spot
+  # while the team has the ball. Going for the ball stays the team's own choice. false = the bare formation anchor.
+  shape_guide: true
+  # A learning player is offered only the choices that belong to his situation. Off the ball: STAY, HOLD_SHAPE,
+  # GO_TO_BALL, TACKLE and SHADOW, not the 8 bare directions (a new policy spreads its choices over them, and its
+  # players wander). On the ball: the directions, STAY, PASS, DRIBBLE_GOAL and SHOOT. false = every valid action.
+  context_mask: false
 
 mechanics:
   tackle_dist: 2.0
@@ -50,10 +58,15 @@ reward:
   w_pass: 0.0                         # off: a bonus per completed pass is farmed by passing back and forth. Forward passes are paid by w_progress
   w_tackle: 0.02
   w_shot: 0.02                        # times the shot's chance of scoring (a certain goal earns all of it)
+  w_big_chance: 0.0                   # extra for a shot taken at a chance of big_chance or better, goal or not: getting
+  big_chance: 0.3                     # into a good position is paid, a hopeful shot from far out is not. 0 = off
   w_turnover: -0.02
   w_progress: 0.002                   # per metre the ball moves toward their goal while we keep it (back = minus)
   progress_pass_cap: 20.0             # ... but one pass is paid for at most this many metres (0 = no cap): building
                                       # up with several passes earns more than one long ball over the same ground
+  w_formation: 0.002                  # per step, times how well our players stand on their HOLD_SHAPE spots (needs
+  formation_dist: 15.0                # actions.shape_guide): 1 for a player on his spot, about a third at this many
+                                      # metres. The player nearest the ball is not counted. 0 = off
   shape_cap: 5.0                      # cap on total |shaping| per episode
   shaping_weight: 1.0                 # lambda_t: the trainer anneals this toward 0
 
@@ -124,7 +137,8 @@ opponent:
     score_reactive: {check_interval: 50, trail_thresh: 1, lead_thresh: 1,
                      f_att: "1-2-2", f_def: "3-1-1"}
   attack:  {shoot_min: 0.3, w_fwd: 2.0, w_open: 0.5, w_dist: 0.3, pass_min: 0.3,
-            d_danger: 6.0, hub_bonus: 0.3, open_max: 15.0, lane_margin: 1.5, safe_slack: 1.5, shoot_close: 14.0, shoot_free: 7.0, max_pass: 60.0, fwd_cap: 1.0}
+            d_danger: 6.0, hub_bonus: 0.3, open_max: 15.0, lane_margin: 1.5, safe_slack: 1.5, shoot_close: 14.0, shoot_free: 7.0, max_pass: 60.0, fwd_cap: 1.0,
+            call: true}   # call: for a pass to a teammate, the defenders that teammate sees count as well as the passer's own
   support: {adv: 4.0, mid: 6.0, def: 1.0, r_support: 10.0,
             offer_dist: 10.0, offer_max: 30.0, offer_sep: 8.0, offer_space: 6.0}   # midfielders offer a back pass this far behind/beside the carrier
   block:   {push: 0.0, drop: 0.0, rate: 0.5}   # team-wide x shift: + when we have the ball, - when they do. 0/0 = off

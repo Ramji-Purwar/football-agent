@@ -304,7 +304,7 @@ Flags:
 | Flag | Default | Effect |
 |---|---|---|
 | `--mode` | `scripted` | `scripted` = both teams heuristic; `random` = our team random |
-| `--ckpt` | none | A trained team (`runs/<name>/ckpt.pt`) plays blue instead of `--mode`. It gets the match length, vision radius, structure level and formation it was trained with, unless the flags say otherwise. Needs torch |
+| `--ckpt` | none | A trained team (`runs/<name>/ckpt.pt`) plays blue instead of `--mode`. It gets the match length, vision radius, structure level and formation it was trained with, unless the flags say otherwise, and the config values of its `--set` (for example `actions.context_mask`). Needs torch |
 | `--opp-eps` | cfg default (0) | Red players act at random this often (0 to 1): the weakened opponent of the easy start in `training.md`, Section 7 |
 | `--T` | 1200 | Match length in steps (with `--ckpt`: as in training) |
 | `--fps` | 20 | Starting FPS |

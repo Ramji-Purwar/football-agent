@@ -81,6 +81,11 @@ class FootballEnv:
         self.controllers[0] = (ScriptedTeam(self.team_cfg[0], np.random.default_rng(s_ours), team=0,
                                             formation=self.formation[0], playmaker=None, mode_override="NONE")
                                if self.scripted_ours else None)
+        # HOLD_SHAPE for a learning team: a scripted team that only looks on, and says where each player would stand
+        self.shape_guide = None
+        if self.controllers[0] is None and c.actions.shape_guide and self.zeta[0] >= 1:
+            self.shape_guide = ScriptedTeam(self.team_cfg[0], np.random.default_rng(s_ours), team=0,
+                                            formation=self.formation[0], playmaker=None, mode_override="NONE")
 
         first = int(self.rng.integers(0, 2)) if start_team is None else int(start_team)
         self._kickoff(first)
@@ -116,6 +121,8 @@ class FootballEnv:
         self.style[team] = name
         if self.controllers.get(team) is not None:
             self.controllers[team].set_cfg(self.team_cfg[team])
+        if team == 0 and self.shape_guide is not None:
+            self.shape_guide.set_cfg(self.team_cfg[team])
         self._refresh_anchors(team)
 
     def _refresh_anchors(self, team):
@@ -218,6 +225,8 @@ class FootballEnv:
         obs = {team: {i: build_observation(self, team, i) for i in range(5)} for team in (0, 1)}
         raw = {1: self.controllers[1].act(self.t, obs[1])}
         raw[0] = self.controllers[0].act(self.t, obs[0]) if self.controllers[0] is not None else (our_actions or {})
+        if self.shape_guide is not None:
+            self.shape_guide.watch(obs[0])
         acts = {0: {}, 1: {}}
         for team in (0, 1):
             for i in range(5):
@@ -361,6 +370,13 @@ class FootballEnv:
             self.progress_x = float(self.ball_pos[0])
         elif goal_by is not None or not (self.ball_state == "flight" and self.flight["passer"][0] == 0):
             self.progress_x = None
+        # formation: paid every step by how well our players stand on their HOLD_SHAPE spots (1 on the spot, about
+        # a third at formation_dist m). The player nearest the ball is not counted, so going for the ball is free.
+        if c.reward.w_formation > 0 and self.shape_guide is not None:
+            near = min(range(5), key=lambda j: dist(self.pos[0][j], self.ball_pos))
+            fit = [math.exp(-(dist(self.pos[0][j], to_frame(0, self.shape_guide.shape_spot(j), L, W))
+                              / c.reward.formation_dist) ** 2) for j in range(5) if j != near]
+            shaping += c.reward.w_formation * float(np.mean(fit))
         self.stats["ball_thirds"][min(2, int(3 * self.ball_pos[0] / L))] += 1
         shaped = self.shaping_weight * shaping
         room = self.cfg.reward.shape_cap - self.shaping_used
@@ -392,6 +408,8 @@ class FootballEnv:
             d = dir_to_frame(team, np.array([math.cos(ang), math.sin(ang)]))
             return pos + d * self.cfg.speeds.player
         if k == Kind.HOLD_SHAPE:
+            if team == 0 and self.shape_guide is not None:     # a learning team: where a scripted player would stand
+                return to_frame(team, self.shape_guide.shape_spot(i), L, W)
             return self.anchors[team][i]
         if k == Kind.GO_TO_BALL:
             return self.ball_pos
@@ -569,7 +587,10 @@ class FootballEnv:
                 self.ball_pos = to_frame(team, np.array([L - 2.0, y]), L, W)
                 self.ball_state = "loose"
         # the shot bonus is paid by the chance the shot had: a flat bonus was collected with hopeful shots from range
-        return c.reward.w_shot * float(p) if team == 0 else 0.0
+        if team != 0:
+            return 0.0
+        r = c.reward                               # a big chance (big_chance or better) earns w_big_chance on top
+        return r.w_shot * float(p) + (r.w_big_chance if p >= r.big_chance else 0.0)
 
     def _in_box(self, team, p) -> bool:
         """Is the world point p inside `team`'s own penalty box (mechanics.goal_kick.box)?"""

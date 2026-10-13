@@ -92,6 +92,13 @@ def compute_mask(env, team: int, idx: int, obs_partial: dict) -> np.ndarray:
             ok = bool(obs_partial["opp_visible"][a.arg])
         else:
             ok = False
+        # a learning player is offered only the choices that belong to his situation: no HOLD_SHAPE, GO_TO_BALL or
+        # SHADOW on the ball, no steps in a bare direction off it
+        if ok and env.cfg.actions.context_mask and env.controllers.get(team) is None:
+            if has_ball:
+                ok = k not in (Kind.HOLD_SHAPE, Kind.GO_TO_BALL, Kind.SHADOW)
+            else:
+                ok = k != Kind.MOVE_DIR
         m[i] = ok
     return m
 

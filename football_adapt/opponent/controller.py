@@ -92,6 +92,7 @@ class ScriptedTeam:
     def act(self, t, obs_by_player: dict) -> dict:
         self._update_timers(next(iter(obs_by_player.values())).possession)
         ctx = self._team_context(obs_by_player)
+        self._team_obs = obs_by_player
         self._update_shape(ctx)
         if self.in_transition:
             self.transition_steps += 1
@@ -103,6 +104,29 @@ class ScriptedTeam:
             if isinstance(a, Action) and a.kind in (Kind.PASS, Kind.THROUGH) and self.mv.pass_move.steps > 0:
                 self.mover, self.mover_timer = j, self.mv.pass_move.steps
         return out
+
+    # ------------------------------------------------------------------ shape guide for a learning team
+    def watch(self, obs_by_player: dict):
+        """One step of looking on without playing: keeps the block, the timers and the team context up to date.
+        A learning team has such a team beside it, to be told where HOLD_SHAPE takes a player (shape_spot)."""
+        self._obs = obs_by_player
+        self._update_timers(next(iter(obs_by_player.values())).possession)
+        self._ctx = self._team_context(obs_by_player)
+        self._update_shape(self._ctx)
+
+    def shape_spot(self, j):
+        """Where player j stands to hold the team's shape (team frame): the spot a scripted player takes when the
+        ball is not his to deal with. His supporting spot while a teammate has the ball or our pass is in the air,
+        otherwise his home position with the usual small drift toward the ball. Going for the ball, tackling and
+        cover are left out: the learning team decides those for itself."""
+        o = self._obs[j]
+        ours = o.possession == OWN or (o.possession == LOOSE and self.last_poss == OWN)
+        if ours and o.ball_visible and not o.has_ball:
+            return self._support(j, o, self._ctx, carrier=o.ball_pos if o.possession == LOOSE else None).arg
+        home = self._home(o.anchor, o.slot_type)
+        if not o.ball_visible:
+            return home
+        return home + self.z.omega * clip_norm(o.ball_pos - home, self.z.r_zone)
 
     def _update_timers(self, poss):
         self.cp_timer = max(0, self.cp_timer - 1)
@@ -392,8 +416,15 @@ class ScriptedTeam:
         if self.ca_timer > 0:
             w_fwd *= self.mv.counter.fwd_mult                        # counter-attack: go forward early
         cands = []
+        team_obs = getattr(self, "_team_obs", None)
+        mine = defs
         for k, tid in enumerate(o.teammate_ids):
             best = None
+            # the receiver calls: the defenders HE sees count too, so nobody passes to a teammate who is marked by a
+            # defender the passer cannot see
+            defs = mine
+            if self.at.call and team_obs is not None and tid in team_obs:
+                defs = mine + [d for d in self._visible_defenders(team_obs[tid]) if all(dist(d, x) > 1e-6 for x in mine)]
             for through, pt in ((False, o.teammate_pos[k]), (True, self._through_point(o, o.teammate_pos[k], defs))):
                 if pt is None:
                     continue
