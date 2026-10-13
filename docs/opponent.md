@@ -253,6 +253,8 @@ For each of the four teammates the carrier considers a pass to feet and a throug
 - No visible defender could intercept it at the kick, even with 1.5 extra steps in hand (`attack.safe_slack`). The game lets a defender intercept when at most 0.5 steps late; the carrier refuses the pass unless the defender would be more than 2.0 steps late. A pass that is safe by a hair gets intercepted in practice.
 - No visible defender stands within 3 m of the ball's path (`flight_cut.radius + attack.lane_margin`), not counting the first 3 m.
 
+**The receiver's call** (`attack.call`, on). For a pass to a teammate, "visible" means seen by the carrier **or by that teammate**. Without it the carrier passed to a teammate who was marked by a defender standing beyond the carrier's own vision: the defender took the ball at the kick, and the teammate, who was never the one the ball was going to, walked away. That was 4.8 passes a match between two scripted teams and 15 to 20 against a trained team that had learnt to stand there. With the call 95% of the scripted team's passes are completed (83% before) and such a pass happens 0.1 times a match. It is the one place where a player uses what a teammate sees.
+
 **The score** of an allowed pass:
 
 ```
@@ -579,6 +581,7 @@ Everything below is under `opponent.` in `default.yaml` unless it says otherwise
 | `attack.hub_bonus` | 0.3 | Pass-score bonus for passing to the playmaker |
 | `attack.safe_slack` | 1.5 | Extra steps a defender must be late before a pass counts as safe |
 | `attack.lane_margin` | 1.5 | Extra clearance from defenders along the ball's path (m) |
+| `attack.call` | true | For a pass to a teammate, the defenders that teammate sees count as well as the carrier's own (Section 6.2) |
 | `attack.max_pass`, `roles.d_max_pass` | 60.0, 45.0 | Longest pass, for anyone and for defenders (m) |
 | `attack.d_danger` | 6.0 | A defender this close ahead blocks the dribble (m) |
 | `roles.d_dribble_max_x` | 0.6 | Defenders do not dribble past this share of the pitch when a pass is possible |

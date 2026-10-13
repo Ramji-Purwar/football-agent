@@ -336,6 +336,8 @@ The settings that go with it (the commands are in Section 0):
 
 Only the entropy setting has been compared with its alternative. The other four are the recipe as it was run.
 
+**These results are against the opponent as it was before the receiver's call (`opponent.attack.call`, `opponent.md` Section 6.2).** That opponent passed to teammates marked by a defender the passer could not see, and the trained teams took the ball from 15 to 20 such passes a match. Against the opponent with the call, the two 2M-step teams score W 0.07 and 0.08 (60 matches each), so the numbers below show that the recipe trains a team, not how good a team is against today's opponent.
+
 Against the full-strength opponent (2-2-1 against 2-2-1, memoryless actor, 56 full matches a row unless it says otherwise, W = wins + draws / 2):
 
 | Team | Goals for – against | Wins-draws-losses | W |
