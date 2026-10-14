@@ -10,13 +10,6 @@ Run from football_adapt/:
 made stronger step by step as our team gets ahead of it (see EPS_STEP below). The evaluations are always against
 the opponent at full strength. Against the full-strength opponent from step 0 a new policy never gets near the goal.
 
---init is the rule-based start: the networks begin as a copy of a hand-written team (training/pretrain.py writes the
-file) and train against the full-strength opponent from step 0, with no easy start:
-
-   python -m training.pretrain --out runs/warm.pt --set actions.context_mask=true
-   python -m training.train --name warm --workers --init runs/warm.pt --critic-warmup 10 --entropy-coef 0.001 \
-          --shaping-anneal-end 1000000000 --eval-matches 50 --set actions.context_mask=true
-
 Everything goes to runs/<name>/: config.json, log.jsonl (one line per update and per evaluation), ckpt.pt and,
 when the run is finished, result.json. Running the SAME command again resumes from ckpt.pt, so a run survives a
 node that expires; with a larger --total-steps it carries a finished run on. Our formation, radius and structure
@@ -364,11 +357,6 @@ def parse_args(argv=None):
                     help="steps over which shaping falls to 0 (with the easy start: counted from full strength)")
     ap.add_argument("--opp-eps-start", type=float, default=None,
                     help="easy start: opponent randomness to begin with, see EPS_STEP (default: the opponent as configured)")
-    ap.add_argument("--init", default=None,
-                    help="rule-based start: begin from the actor and critic in this file (written by training.pretrain)")
-    ap.add_argument("--critic-warmup", type=int, default=0,
-                    help="updates at the start in which only the critic learns (for --init: the copied actor is kept "
-                         "until the critic can judge its play)")
     # evaluation and checkpoints
     ap.add_argument("--eval-interval", type=int, default=250_000)
     ap.add_argument("--eval-matches", type=int, default=20)
@@ -450,12 +438,6 @@ def train(args):
         anneal_from = ck.get("anneal_from", anneal_from)
         rng = np.random.default_rng([args.seed, step])         # new games after a restart, not the same ones again
         print(f"[{name}] resuming from step {step}")
-    elif args.init:                            # the rule-based start: begin as the copy written by training/pretrain.py
-        ini = torch.load(args.init, map_location="cpu", weights_only=False)
-        actor.load_state_dict(ini["actor"]); critic.load_state_dict(ini["critic"])
-        made_with, here = ini.get("overrides", {}), set_overrides(args.set)
-        if made_with != here:                  # e.g. a copy that has never had to choose among the 8 directions
-            print(f"[{name}] WARNING: {args.init} was made with --set {made_with}, this run has {here}")
     with open(run / "config.json", "w") as f:
         json.dump({"args": vars(args), "scenario": scen, "cfg": cfg.to_dict()}, f, indent=2)
     log = open(run / "log.jsonl", "a")
@@ -484,12 +466,7 @@ def train(args):
         buf, val, episodes = vec.rollout(actor, critic, R, (w, eps))
         buf["adv"], buf["ret"] = gae(buf["rew"], val, buf["done"], args.gamma, args.lam)
         t_roll = time.time() - t0
-        warmup = step < args.critic_warmup * R * E             # only the critic learns: the actor's steps have size 0
-        if warmup:
-            opt_a.param_groups[0]["lr"] = 0.0
         losses = ppo_update(actor, critic, opt_a, opt_c, buf, args, rng)
-        if warmup:
-            opt_a.param_groups[0]["lr"] = args.lr_actor
         step += R * E
 
         dt = time.time() - t0

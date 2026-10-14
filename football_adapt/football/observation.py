@@ -110,6 +110,16 @@ def compute_mask(env, team: int, idx: int, obs_partial: dict) -> np.ndarray:
             else:
                 ok = k != Kind.MOVE_DIR
         m[i] = ok
+    # take the shot (actions.early_shot.take): a defender is closing in and the shot is on, so a learning carrier
+    # shoots or passes now. Carrying on only lets the chance fall and the defender take the ball
+    es = env.cfg.actions.early_shot
+    if (es.enabled and es.take and has_ball and env.controllers.get(team) is None
+            and m[sp.index_of_kind(Kind.SHOOT)]
+            and any(obs_partial["opp_visible"][j] and dist(env.pos[1 - team][j], env.pos[team][idx]) <= es.pressed
+                    for j in range(5))):
+        for i in range(sp.n):
+            if sp.decode(i).kind in (Kind.MOVE_DIR, Kind.STAY, Kind.DRIBBLE_GOAL):
+                m[i] = False
     return m
 
 

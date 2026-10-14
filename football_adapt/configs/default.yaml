@@ -26,8 +26,13 @@ actions:
   # A learning player is offered SHOOT only when the shot is the best he can do. Within `far` m of goal, always.
   # Further out, not when he could carry the ball closer (nobody within `pressed` m of him, nobody within `ahead` m
   # in front of him: the scripted team carries on then), and not below a `min_chance` chance to score (the scripted
-  # team's own bar, attack.shoot_min). min_chance 0 = only the first test.
-  early_shot: {enabled: false, pressed: 6.0, ahead: 7.0, far: 14.0, min_chance: 0.3}
+  # team's own bar, attack.shoot_min), or below `min_chance_pressed` when a defender is closing in (within `pressed`
+  # m): then he shoots before the defender gets the ball, whose block leaves about 0.02 once he is on him. Within
+  # `far` m, not below `min_chance_close` (0 = always). take: when a defender is closing in and the shot is on, he
+  # may only shoot or pass (no carrying on, no stepping, no standing): trained teams carried on 75-84% of the time
+  # and lost the ball half of those times.
+  early_shot: {enabled: false, pressed: 6.0, ahead: 7.0, far: 14.0, min_chance: 0.3, min_chance_pressed: 0.15,
+               min_chance_close: 0.0, take: false}
   # HOLD_SHAPE for a learning team sends the player to the spot a scripted player would hold: his home position, which
   # moves up, drops back and slides across with the ball as the scripted team's block does, and his supporting spot
   # while the team has the ball. Going for the ball stays the team's own choice. false = the bare formation anchor.
@@ -69,6 +74,9 @@ reward:
   w_big_chance: 0.0                   # extra for a shot taken at a chance of big_chance or better, goal or not: getting
   big_chance: 0.3                     # into a good position is paid, a hopeful shot from far out is not. 0 = off
   w_turnover: -0.02
+  w_interception: 0.0                 # we cut out one of their passes (a tackle earns w_tackle)
+  w_open_lanes: 0.0                   # (negative) per step they have the ball, per pass their carrier has open (none
+                                      # of ours would get to it): closing lanes and winning the ball back lower it
   w_progress: 0.002                   # per metre the ball moves toward their goal while we keep it (back = minus)
   progress_pass_cap: 20.0             # ... but one pass is paid for at most this many metres (0 = no cap): building
                                       # up with several passes earns more than one long ball over the same ground

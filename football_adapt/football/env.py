@@ -14,7 +14,7 @@ from .formations import FormationBook
 from .geometry import (dist, unit, clip_norm, move_toward, rotate, to_frame, dir_to_frame,
                        dist_point_segment, closest_point_on_segment)
 from .mechanics import (control_rating, shot_probability, sure_goal, pass_interception, tackle_probability)
-from .observation import build_observation, flatten, global_state, flat_dim
+from .observation import build_observation, flatten, global_state, flat_dim, open_pass
 
 
 class FootballEnv:
@@ -396,6 +396,10 @@ class FootballEnv:
                     own[j] = c.reward.w_formation * f
             else:
                 shaping += c.reward.w_formation * float(np.mean(list(fit.values())))
+        # open lanes: every step they have the ball, a cost per pass their carrier has open (none of us would get to
+        # it). Closing their lanes and winning the ball back both lower it; letting them keep the ball raises it
+        if c.reward.w_open_lanes and self.holder is not None and self.holder[0] == 1:
+            shaping += c.reward.w_open_lanes * self.open_lanes()
         self.stats["ball_thirds"][min(2, int(3 * self.ball_pos[0] / L))] += 1
         shaped = self.shaping_weight * shaping
         room = self.cfg.reward.shape_cap - self.shaping_used
@@ -565,6 +569,8 @@ class FootballEnv:
                     self.stats["sigma_interceptions"] += 1
                 if team == 0:
                     shaping += c.reward.w_turnover
+                else:                              # we cut out their pass
+                    shaping += c.reward.w_interception
         else:
             self.holder = None
             self.ball_state = "loose"
@@ -627,20 +633,30 @@ class FootballEnv:
         r = c.reward                               # a big chance (big_chance or better) earns w_big_chance on top
         return r.w_shot * float(p) + (r.w_big_chance if p >= r.big_chance else 0.0)
 
+    def open_lanes(self) -> int:
+        """How many passes their carrier has open: teammates of his none of our players would get to a pass to (the
+        open_pass test, all of ours counted)."""
+        hi, ours = self.holder[1], np.ones(5, bool)
+        return sum(int(open_pass(self, 1, self.pos[1][hi], self.pos[1][k], ours)) for k in range(5) if k != hi)
+
     def early_shot(self, shooter, defenders, control: float = 1.0) -> bool:
-        """A shot now is not the best he can do (actions.early_shot). Within early_shot.far m of goal a shot is always
-        fine. Further out it is not when he could carry the ball closer (nobody within `pressed` m of him and nobody
-        within `ahead` m in front of him), nor when its chance to score is below `min_chance`. Points in the
-        shooter's TEAM frame (team 0's is the world frame)."""
+        """A shot now is not the best he can do (actions.early_shot). Within early_shot.far m of goal it is not when
+        its chance is below `min_chance_close` (a defender blocking it: pass or go round him). Further out it is not
+        when he could carry the ball closer (nobody within `pressed` m of him and nobody within `ahead` m in front of
+        him), nor when its chance is below `min_chance`, or below `min_chance_pressed` when a defender is closing in
+        on him (within `pressed` m: shoot before he gets the ball). Points in the shooter's TEAM frame (team 0's is
+        the world frame)."""
         e, m = self.cfg.actions.early_shot, self.cfg.mechanics
         goal = np.array([self.L, self.W / 2])
+        chance = lambda: shot_probability(shooter, goal, defenders, control, m.p_max, m.d0, m.shot_block_scale,
+                                          sure_goal(m))
         if dist(shooter, goal) <= e.far:
-            return False
-        if not any(dist(d, shooter) <= e.pressed or (d[0] > shooter[0] and dist(d, shooter) <= e.ahead)
-                   for d in defenders):
+            return e.min_chance_close > 0 and chance() < e.min_chance_close
+        pressed = any(dist(d, shooter) <= e.pressed for d in defenders)
+        if not pressed and not any(d[0] > shooter[0] and dist(d, shooter) <= e.ahead for d in defenders):
             return True
-        return e.min_chance > 0 and shot_probability(shooter, goal, defenders, control, m.p_max, m.d0,
-                                                     m.shot_block_scale, sure_goal(m)) < e.min_chance
+        bar = e.min_chance_pressed if pressed else e.min_chance
+        return bar > 0 and chance() < bar
 
     def _in_box(self, team, p) -> bool:
         """Is the world point p inside `team`'s own penalty box (mechanics.goal_kick.box)?"""
