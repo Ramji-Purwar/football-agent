@@ -23,16 +23,11 @@ actions:
   # for the scripted team). Off, three quarters of a trained team's interceptions came from defenders out of the
   # passer's sight.
   open_pass: {enabled: true, slack: 1.5, lane: 1.5, call: false}
-  # A learning player is offered SHOOT only when the shot is the best he can do. Within `far` m of goal, always.
-  # Further out, not when he could carry the ball closer (nobody within `pressed` m of him, nobody within `ahead` m
-  # in front of him: the scripted team carries on then), and not below a `min_chance` chance to score (the scripted
-  # team's own bar, attack.shoot_min), or below `min_chance_pressed` when a defender is closing in (within `pressed`
-  # m): then he shoots before the defender gets the ball, whose block leaves about 0.02 once he is on him. Within
-  # `far` m, not below `min_chance_close` (0 = always). take: when a defender is closing in and the shot is on, he
-  # may only shoot or pass (no carrying on, no stepping, no standing): trained teams carried on 75-84% of the time
-  # and lost the ball half of those times.
-  early_shot: {enabled: false, pressed: 6.0, ahead: 7.0, far: 14.0, min_chance: 0.3, min_chance_pressed: 0.15,
-               min_chance_close: 0.0, take: false}
+  # Through balls for a learning team: THROUGH_k plays the ball into the space ahead of teammate k for him to run
+  # onto (the scripted team's own rule: `lead` m ahead, toward goal once he is in their half, a spot he reaches
+  # before the ball, no defender within `space` m of it or of him, not to a teammate more than `back_tol` m behind).
+  # Offered when no defender the passer counts could get to it on the way (`cut_margin` m of slack).
+  through: {enabled: true, lead: 8.0, space: 8.0, cut_margin: 0.5, back_tol: 2.0}
   # HOLD_SHAPE for a learning team sends the player to the spot a scripted player would hold: his home position, which
   # moves up, drops back and slides across with the ball as the scripted team's block does, and his supporting spot
   # while the team has the ball. Going for the ball stays the team's own choice. false = the bare formation anchor.
@@ -67,30 +62,63 @@ control:   {c_min: 0.5, l_ctrl: 20.0}
 structure: {zeta: 2}                  # our structure level: 0, 1 or 2 (the opponent is always 2)
 
 reward:
-  eta: 1.0
-  w_pass: 0.0                         # off: a bonus per completed pass is farmed by passing back and forth. Forward passes are paid by w_progress
-  w_tackle: 0.02
-  w_shot: 0.02                        # times the shot's chance of scoring (a certain goal earns all of it)
-  w_big_chance: 0.0                   # extra for a shot taken at a chance of big_chance or better, goal or not: getting
-  big_chance: 0.3                     # into a good position is paid, a hopeful shot from far out is not. 0 = off
-  w_turnover: -0.02
-  w_interception: 0.0                 # we cut out one of their passes (a tackle earns w_tackle)
-  w_open_lanes: 0.0                   # (negative) per step they have the ball, per pass their carrier has open (none
-                                      # of ours would get to it): closing lanes and winning the ball back lower it
-  w_progress: 0.002                   # per metre the ball moves toward their goal while we keep it (back = minus)
-  progress_pass_cap: 20.0             # ... but one pass is paid for at most this many metres (0 = no cap): building
-                                      # up with several passes earns more than one long ball over the same ground
-  w_formation: 0.002                  # per step, times how well our players stand on their HOLD_SHAPE spots (needs
-  formation_dist: 15.0                # actions.shape_guide): 1 for a player on his spot, about a third at this many
-                                      # metres. The player nearest the ball is not counted. 0 = off
-  w_chance: 0.0                       # times the change of the carrier's chance to score if he shot now, while we
-                                      # keep the ball: a possession earns how much better a chance it made (going
-                                      # back loses it again; nothing paid on winning, losing or shooting). 0 = off
-  per_player: false                   # true: w_formation is paid to each player for his own spot (not the team for
-                                      # their mean, and outside shape_cap), and the trainer gives every player his own
-                                      # value and advantage. Goals and every other term stay team rewards
-  shape_cap: 5.0                      # cap on total |shaping| per episode
-  shaping_weight: 1.0                 # lambda_t: the trainer anneals this toward 0
+  # Everything in POINTS. The game hands the trainer points x `scale`; only the ratios between terms matter to the
+  # learning. Train with --gamma 1 (the default) so that every choice is judged by the whole match. The result and the
+  # goals go to the whole team. Every other term is "small": per player, all of them together stay within +-small_cap
+  # over a match, so a win always counts for more than any sum of them. "Own" terms go to the player who earned
+  # them (per_player), the others to every player.
+  scale: 0.001
+  eta: 1000.0                         # end of match: + for a win, - for a loss, 0 for a draw
+  goal: 100.0                         # we score +, they score -
+  small_cap: 50.0
+  per_player: true                    # own terms to the player who earned them, and every player his own value and
+                                      # advantage in the trainer (false: everything to the team)
+  shaping_weight: 1.0                 # lambda_t on the small terms: the trainer can anneal it toward 0
+  # how much a pass would help (free to receive, open lanes): the metres it gains toward goal / gain, or the rise in
+  # the chance to score / chance, whichever is larger, 0..1. 0 for a pass back or sideways
+  usefulness: {gain: 20.0, chance: 0.3}
+  # passing
+  w_pass_done: 0.5                    # own: a completed pass, any direction; only the first pass_count_cap of the match
+  pass_count_cap: 30
+  w_pass_accuracy: 5.0                # end of match: x how far the share of our passes completed is above accuracy_bar
+  accuracy_bar: 0.9                   # (0 at the bar, all of it at 100%), in full from accuracy_min passes. Small: the
+  accuracy_min: 10                    # pass test offers only safe passes, so every team completes ~95% of its passes
+  w_receive: 0.5                      # own: receiving a completed pass that went receive_gain m or more forward
+  receive_gain: 5.0
+  w_free: 0.0                         # own: per step we have the ball and the carrier has an open pass to him, x how
+  free_cap: 10.0                      # useful that pass would be; at most free_cap a match. Off: a team that kept the
+                                      # ball deep earned the most of it; w_receive pays being free when it is used
+  w_turnover: -2.0                    # own: he lost the ball (tackled, his pass cut out, his loose pass picked up)
+  # attack
+  w_progress: 0.05                    # per metre the ball moves toward their goal while we keep it (back = minus)
+  progress_pass_cap: 20.0             # ... but one pass is paid for at most this many metres (0 = no cap)
+  w_chance: 10.0                      # x the change of our carrier's chance to score (0..1) while we keep the ball
+  w_shot: 5.0                         # own: x the shot's chance
+  w_big_chance: 10.0                  # own: a shot at a chance of big_chance or better
+  big_chance: 0.3
+  w_poor_shot: -5.0                   # own: a shot that is not the best he can do (shot_rule)
+  w_missed_shot: -5.0                 # own: the ball tackled off him within shot_rule.missed_steps of a moment he had
+                                      # the shot on (a defender closing in, a chance of min_chance_pressed or more)
+  # The best shot he can do: within `far` m of goal, a chance of min_chance_close or more. Further out, not when he
+  # could carry the ball closer (nobody within `pressed` m of him, nobody within `ahead` m in front: the scripted team
+  # carries on then); pressed, min_chance_pressed or more; blocked in front only, min_chance or more.
+  shot_rule: {pressed: 6.0, ahead: 7.0, far: 14.0, min_chance: 0.3, min_chance_pressed: 0.15, min_chance_close: 0.15,
+              missed_steps: 5}
+  # defence
+  w_chance_against: -10.0             # x the change of THEIR carrier's chance to score while they keep the ball (a
+                                      # fall gives it back): the mirror of w_chance
+  w_shot_against: -5.0                # x the chance of each shot they take
+  w_tackle: 2.0                       # own: he tackled the ball off them
+  w_interception: 3.0                 # own: he cut out their pass
+  win_zone: 1.0                       # winning the ball pays x (1 + win_zone x how far up the pitch, 0..1)
+  w_open_lanes: -0.2                  # own: per step they have the ball, per pass their carrier has open (none of ours
+                                      # would get to it), x how dangerous it is (usefulness to them), to the player of
+                                      # ours nearest that lane (not the one nearest the ball, who goes for it)
+  # positions
+  w_formation: 0.01                   # own (team mean without per_player): per step, how well he stands on his
+  formation_dist: 15.0                # HOLD_SHAPE spot (needs actions.shape_guide): 1 on it, about a third at this many
+                                      # metres. His support run while we have the ball, his place without it. The player
+                                      # nearest the ball is not counted
 
 # Anchors are fractions of the pitch in the TEAM frame:
 # [x along the length (0 = own goal, 1 = opponent goal), y across the width].

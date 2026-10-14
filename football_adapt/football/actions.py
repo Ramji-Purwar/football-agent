@@ -15,8 +15,9 @@ class Kind(Enum):
     TACKLE = auto()
     SHADOW = auto()        # arg = opponent index 0..4
     MOVE_TO = auto()       # macro for scripted controllers: arg = point in TEAM frame (not in the learner's set)
-    THROUGH = auto()       # macro for scripted controllers: through ball. arg = [teammate index 0..3, x, y] with the
-                           # point in TEAM frame; the ball is played to that point for the teammate to run onto
+    THROUGH = auto()       # through ball: the ball is played into the space ahead of a teammate for him to run onto.
+                           # Scripted controllers: arg = [teammate index 0..3, x, y], the point in TEAM frame. A learning
+                           # team (actions.through): arg = teammate index 0..3, the game works out the point
     CLEAR = auto()         # macro for scripted controllers: clearance. arg = point in TEAM frame to aim at (None =
                            # straight upfield); the ball flies up to mechanics.clear.dist m and lands loose
 
@@ -48,15 +49,18 @@ STAY = Action(Kind.STAY)
 
 
 class ActionSpace:
-    """Index layout: MOVE_DIR x D, STAY, HOLD_SHAPE, GO_TO_BALL, PASS x4, DRIBBLE_GOAL, SHOOT, TACKLE, SHADOW x5."""
+    """Index layout: MOVE_DIR x D, STAY, HOLD_SHAPE, GO_TO_BALL, PASS x4, DRIBBLE_GOAL, SHOOT, TACKLE, SHADOW x5,
+    and with through balls THROUGH x4 at the end (so the first 23 keep their places)."""
 
-    def __init__(self, n_directions: int):
+    def __init__(self, n_directions: int, through: bool = False):
         self.D = n_directions
         t = [Action(Kind.MOVE_DIR, d) for d in range(self.D)]
         t += [Action(Kind.STAY), Action(Kind.HOLD_SHAPE), Action(Kind.GO_TO_BALL)]
         t += [Action(Kind.PASS, k) for k in range(4)]
         t += [Action(Kind.DRIBBLE_GOAL), Action(Kind.SHOOT), Action(Kind.TACKLE)]
         t += [Action(Kind.SHADOW, j) for j in range(5)]
+        if through:
+            t += [Action(Kind.THROUGH, k) for k in range(4)]
         self._table = t
         self.n = len(t)
         self._index = {}
@@ -67,8 +71,8 @@ class ActionSpace:
         return self._table[int(idx)]
 
     def index_of(self, action: Action):
-        """Index in the learner's action set, or None for macros not in it (MOVE_TO)."""
-        if action.kind in (Kind.MOVE_TO, Kind.THROUGH, Kind.CLEAR):
+        """Index in the learner's action set, or None for macros not in it (MOVE_TO, CLEAR, a scripted THROUGH)."""
+        if action.kind in (Kind.MOVE_TO, Kind.CLEAR) or (action.kind == Kind.THROUGH and hasattr(action.arg, "__len__")):
             return None
         return self._index.get((action.kind, action.arg))
 

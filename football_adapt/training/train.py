@@ -63,7 +63,8 @@ def summary(env, shaping: float) -> dict:
             "passes": s["passes"][0], "pass_completion": s["passes_completed"][0] / max(1, s["passes"][0]),
             "passes_completed": s["passes_completed"][0],
             "shots": s["shots"][0], "chance_per_shot": s["shot_chance"][0] / max(1, s["shots"][0]),
-            "early_shots": s["early_shots"][0],
+            "poor_shots": s["poor_shots"][0], "missed_shots": s["missed_shots"][0],
+            "through_balls": s["through_balls"][0], "turnovers": s["turnovers"][0],
             "possession": s["possession_steps"][0] / T,
             "ball_own_third": s["ball_thirds"][0] / T, "ball_mid_third": s["ball_thirds"][1] / T,
             "ball_their_third": s["ball_thirds"][2] / T,
@@ -345,7 +346,8 @@ def parse_args(argv=None):
     ap.add_argument("--hidden", type=int, default=256)
     ap.add_argument("--lr-actor", type=float, default=3e-4)
     ap.add_argument("--lr-critic", type=float, default=1e-3)
-    ap.add_argument("--gamma", type=float, default=0.99)
+    ap.add_argument("--gamma", type=float, default=1.0,
+                    help="discount: 1 = every choice is judged by the whole match (configs: reward)")
     ap.add_argument("--lam", type=float, default=0.95)
     ap.add_argument("--clip", type=float, default=0.2)
     ap.add_argument("--epochs", type=int, default=5)

@@ -81,6 +81,8 @@ class MAPPOAgent:
         agent = cls(actor, seed, greedy)
         agent.train_args = ck["args"]            # the setting it was trained in: T, radius, zeta, our_formation, ...
         agent.overrides = ck.get("overrides") or {}   # ... and the config values it was trained with (--set)
+        if ck["n_actions"] == 23 and "actions.through.enabled" not in agent.overrides:
+            agent.overrides["actions.through.enabled"] = False      # trained before through balls (23 actions)
         return agent
 
     def reset(self, seed=None):

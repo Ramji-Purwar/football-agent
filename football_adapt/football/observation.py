@@ -90,12 +90,16 @@ def compute_mask(env, team: int, idx: int, obs_partial: dict) -> np.ndarray:
                 ok = open_pass(env, team, env.pos[team][idx], env.pos[team][mate], seen)
         elif k == Kind.SHOOT:
             ok = has_ball and obs_partial["in_shoot_zone"]
-            # a learning player is offered only the shot that is the best he can do: close in, or a real chance he
-            # could not carry closer (actions.early_shot; judged with the defenders he sees)
-            if ok and env.cfg.actions.early_shot.enabled and env.controllers.get(team) is None:
-                L, W = env.L, env.W
-                defs = [to_frame(team, env.pos[1 - team][j], L, W) for j in range(5) if obs_partial["opp_visible"][j]]
-                ok = not env.early_shot(to_frame(team, env.pos[team][idx], L, W), defs, env.control(team, idx))
+        elif k == Kind.THROUGH:
+            # a through ball into the space ahead of a teammate, offered when there is such a space and no defender
+            # the passer counts (with the receiver's call) could get to the ball on the way
+            ok = has_ball and env.controllers.get(team) is None
+            if ok:
+                defs = env.called_defenders(team, idx, a.arg)
+                pt = env.through_point(team, idx, a.arg, defs)
+                me = env.pos[team][idx]
+                seen = np.array([any(np.allclose(env.pos[1 - team][j], d) for d in defs) for j in range(5)])
+                ok = pt is not None and open_pass(env, team, me, pt, seen) and env.path_uncuttable(me, pt, defs)
         elif k == Kind.TACKLE:
             ok = obs_partial["opp_carrier_close"]
         elif k == Kind.SHADOW:
@@ -110,16 +114,6 @@ def compute_mask(env, team: int, idx: int, obs_partial: dict) -> np.ndarray:
             else:
                 ok = k != Kind.MOVE_DIR
         m[i] = ok
-    # take the shot (actions.early_shot.take): a defender is closing in and the shot is on, so a learning carrier
-    # shoots or passes now. Carrying on only lets the chance fall and the defender take the ball
-    es = env.cfg.actions.early_shot
-    if (es.enabled and es.take and has_ball and env.controllers.get(team) is None
-            and m[sp.index_of_kind(Kind.SHOOT)]
-            and any(obs_partial["opp_visible"][j] and dist(env.pos[1 - team][j], env.pos[team][idx]) <= es.pressed
-                    for j in range(5))):
-        for i in range(sp.n):
-            if sp.decode(i).kind in (Kind.MOVE_DIR, Kind.STAY, Kind.DRIBBLE_GOAL):
-                m[i] = False
     return m
 
 
