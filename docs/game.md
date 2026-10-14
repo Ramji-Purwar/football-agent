@@ -204,6 +204,10 @@ Notes:
 
 **Open passes only** (`actions.open_pass`). A learning team is offered `PASS_k` only when no defender the passer can **see** could get to the ball: not by the interception rule above with `slack` = 1.5 extra steps in hand, and not by standing within `lane` = 1.5 m of the cut-out radius of the ball's path. It is the test the scripted team makes before it passes. A defender the passer does not see can still take the ball, so vision still matters. Without this filter half of a learning team's passes were intercepted and it stopped passing altogether. `enabled: false` offers every pass.
 
+**Only the best shot** (`actions.early_shot`, off by default). A learning player is offered `SHOOT` only when the shot is the best he can do. Within `far` = 14 m of goal he may always shoot. Further out he may not when he could carry the ball closer for a better chance (nobody within `pressed` = 6 m of him and nobody within `ahead` = 7 m in front of him: the scripted team carries the ball on then), and not when the shot's chance to score is below `min_chance` = 0.3 (the scripted team's own bar, `attack.shoot_min`). The chance is worked out with the defenders he sees. Measured 2026-10-14 (32 matches each): without the rule the trained teams took a third of their shots free from about 30 m; with only the first test they took none of those, but shot under pressure from 32 m instead (85-90% of their shots, at a chance of 0.10, and none within 14 m), while the scripted team takes 59% of its shots from 8 m at 0.72 and its pressed ones from 18 m at 0.36. It replaced a penalty for such shots (`w_early_shot` = -0.1), which left them unchanged after 500k steps. `env.stats["early_shots"]` counts our shots that the rule would refuse, either way.
+
+**The receiver calls** (`actions.open_pass.call`, off by default). With it on, for a pass to a teammate the defenders *that teammate* sees count as well as the passer's own, as `opponent.attack.call` does for the scripted team: nobody is offered a pass to a teammate marked by a defender out of the passer's sight. Without it (measured 2026-10-14, 32 matches each), 75-86% of the trained teams' interceptions came from defenders the passer could not see (the scripted team: 9%), and they lost 28-36% of their passes longer than 25 m (the scripted team: 6%).
+
 ### 8.3 Dribbling
 
 | Parameter | Value |
@@ -294,12 +298,20 @@ R_t = R_team + lambda_t * phi(state, actions) + [t == T] * ETA * sign(goal_diffe
 | `w_progress` | +0.002 per m | The ball moves toward their goal while we keep it (moving back = minus) |
 | `progress_pass_cap` | 20 m | The most progress one pass is paid for |
 | `w_formation` | +0.002 per step × fit | Our players stand on their `HOLD_SHAPE` spots (Section 7). Fit is the mean over four players of `exp(-(d / formation_dist)^2)`, `d` = distance from the spot, `formation_dist` = 15 m: 1 on the spot, 0.64 at 10 m, 0.37 at 15 m. The player nearest the ball is not counted, so going for the ball costs nothing. Needs `actions.shape_guide`. At most 2.4 a match |
+| `w_chance` | 0 (off) | The change in the carrier's chance to score while we keep the ball. See below |
+| `per_player` | false | `true`: `w_formation` is paid to each player for his own spot, and the trainer gives every player his own value and advantage. See below |
 | `shape_cap` | 5.0 | Maximum total `|shaping|` per episode |
 | `shaping_weight` | 1.0 → 0 | Annealed during training |
 
-All five players receive the **same team reward**.
+All five players receive the **same team reward**, unless `per_player` is on.
+
+**Per-player reward** (`per_player: true`). With one team reward, every player is credited with whatever the team got: a midfielder who stood still is paid for a goal as much as the forward who scored it, so no single player can tell what his own choice was worth. With `per_player` on, the formation term is paid to each player for how well *he* stands on his own `HOLD_SHAPE` spot (his support run while we have the ball, his home position without it; the player nearest the ball is not paid), instead of the team for their mean, and it is outside `shape_cap`. `env.step` returns each player's reward in `info["reward_players"]` (the team reward plus his own part; with `per_player` off all five are the team reward). The trainer then gives the critic each player's slot as well as the global state, so every player gets his own value and advantage (`training/train.py` `with_ids`). Goals, the chance, shots, tackles and the result stay team rewards: paid per player they would make players selfish. A start file must be made with the same setting (`training/pretrain.py --set reward.per_player=true`): its critic has the larger input.
 
 **Progress** (`w_progress`): on every step where our team holds the ball, the reward is `w_progress` times the metres the ball has moved toward the opponent's goal since we were last paid. Carrying the ball forward is paid step by step, a pass is paid in one go when a teammate has it, and moving back costs the same amount, so going back and forth earns nothing. Nothing is paid across a goal, a kickoff or a lost ball. Carrying the ball the whole pitch is worth 0.2, a fifth of a goal. One pass is paid for at most `progress_pass_cap` = 20 m, so three 20 m passes up the pitch earn three times what one 60 m ball earns: a team that had learned to score only from long balls to a forward waiting by the goal gets a reason to build up as well. The long ball is still allowed and still scores. Without this term a new policy never reaches the shooting zone (a random policy takes no shot at all in 20 matches), so it never sees a shot or a goal and has nothing to learn attacking from.
+
+**Chance** (`w_chance`, `football/env.py` `attack_value`) pays for **making a chance**. While one of ours has the ball, the game works out the chance he would score if he shot now (the formula of Section 8.5, every opponent counted, seen or not; 0 out of range), and the team is paid `w_chance` times every change of it. Across our pass in flight it is kept, so a pass is paid in one go when a teammate has it. A possession therefore earns how much better a chance it made; a pass back loses what the pass forward earned, so passing back and forth earns nothing. Nothing is paid when the ball is won, lost (`w_turnover`), shot (`w_shot`) or scored. Off by default; with it off the game and its rewards are unchanged.
+
+Two other parts were tried with it (2026-10-14) and left out. Opponents behind the ball ranked teams as `w_progress` does. Teammates free ahead of the ball, paid per step, was collected by a team that kept the ball in its own third (possession 45%, the ball in our third 58% of the time, 2% passes) after 500k steps; paid on its change instead it came out negative for every team, because the further forward the ball, the fewer teammates are ahead of it.
 
 **Reward-hacking watch:** always log shaping return and win rate together. If shaping rises while win rate is flat, reduce `lambda` or reweight the pass reward by forward distance or defenders beaten.
 
@@ -476,7 +488,7 @@ speeds:  {player: 1.0, dribble: 0.75, pass: 3.0}
 vision:  {radius: 25.0, ball_always: true}
 actions:
   n_directions: 8
-  open_pass: {enabled: true, slack: 1.5, lane: 1.5}
+  open_pass: {enabled: true, slack: 1.5, lane: 1.5, call: false}
   shape_guide: true
   context_mask: false
 

@@ -68,7 +68,10 @@ def summary(env, shaping: float) -> dict:
     return {"win": float(gf > ga), "draw": float(gf == ga), "goal_diff": gf - ga, "goals_for": gf,
             "shaping_return": shaping,
             "passes": s["passes"][0], "pass_completion": s["passes_completed"][0] / max(1, s["passes"][0]),
-            "shots": s["shots"][0], "possession": s["possession_steps"][0] / T,
+            "passes_completed": s["passes_completed"][0],
+            "shots": s["shots"][0], "chance_per_shot": s["shot_chance"][0] / max(1, s["shots"][0]),
+            "early_shots": s["early_shots"][0],
+            "possession": s["possession_steps"][0] / T,
             "ball_own_third": s["ball_thirds"][0] / T, "ball_mid_third": s["ball_thirds"][1] / T,
             "ball_their_third": s["ball_thirds"][2] / T,
             "invalid_action_rate": s["invalid_actions"][0] / (5 * T),
@@ -103,7 +106,8 @@ class Slot:
         return obs
 
     def step(self, actions):
-        obs, r, done, info = self.env.step({i: int(a) for i, a in enumerate(actions)})
+        obs, _, done, info = self.env.step({i: int(a) for i, a in enumerate(actions)})
+        r = info["reward_players"]                # (5,): the team reward, plus each player's own (reward.per_player)
         self.shaping += info["reward_parts"]["shaping"]
         ep = None
         if done:
@@ -115,11 +119,12 @@ class Slot:
 class Collector:
     """A few games played with the current policy. Keeps the games and the GRU hidden states between rollouts."""
 
-    def __init__(self, slots, dims, hidden: int, recurrent: bool):
+    def __init__(self, slots, dims, hidden: int, recurrent: bool, per_player: bool = False):
         self.slots = slots
         self.obs_dim, self.n_act, self.state_dim = dims
+        self.per_player = per_player
         self.actor = Actor(self.obs_dim, self.n_act, hidden, recurrent)
-        self.critic = Critic(self.state_dim, hidden)
+        self.critic = Critic(self.state_dim + (5 if per_player else 0), hidden)
         self.obs = None
 
     @staticmethod
@@ -128,7 +133,7 @@ class Collector:
 
     @torch.no_grad()
     def rollout(self, weights, R: int, knobs):
-        """R steps of every game. Returns the buffer (R, E, ...), the values (R + 1, E) and the finished matches.
+        """R steps of every game. Returns the buffer (R, E, ...), the values (R + 1, E, 5) and the finished matches.
         knobs = (shaping weight, opponent randomness), see Slot.set."""
         self.actor.load_state_dict(weights[0])
         self.critic.load_state_dict(weights[1])
@@ -142,9 +147,9 @@ class Collector:
         buf = dict(obs=np.zeros((R, E, 5, D), np.float32), mask=np.zeros((R, E, 5, A), bool),
                    act=np.zeros((R, E, 5), np.int64), logp=np.zeros((R, E, 5), np.float32),
                    h=np.zeros((R, E, 5, H), np.float32), reset=np.zeros((R, E), np.float32),
-                   state=np.zeros((R, E, self.state_dim), np.float32), rew=np.zeros((R, E), np.float32),
+                   state=np.zeros((R, E, self.state_dim), np.float32), rew=np.zeros((R, E, 5), np.float32),
                    done=np.zeros((R, E), np.float32))
-        val = np.zeros((R + 1, E), np.float32)
+        val = np.zeros((R + 1, E, 5), np.float32)
         episodes = []
         for t in range(R):
             obs = self.obs
@@ -154,7 +159,7 @@ class Collector:
                                         torch.as_tensor(np.repeat(self.reset, 5))[:, None])
             dist = masked_dist(logits[:, 0], torch.as_tensor(obs["mask"]).reshape(E * 5, A))
             a = dist.sample()
-            val[t] = self.critic(torch.as_tensor(obs["state"])).numpy()
+            val[t] = values(self.critic, obs["state"], self.per_player)
             buf["act"][t] = a.numpy().reshape(E, 5)
             buf["logp"][t] = dist.log_prob(a).numpy().reshape(E, 5)
             out = [s.step(x) for s, x in zip(self.slots, buf["act"][t])]
@@ -163,7 +168,7 @@ class Collector:
             buf["done"][t] = [o[2] for o in out]
             self.reset = buf["done"][t].copy()
             episodes += [o[3] for o in out if o[3] is not None]
-        val[R] = self.critic(torch.as_tensor(self.obs["state"])).numpy()
+        val[R] = values(self.critic, self.obs["state"], self.per_player)
         return buf, val, episodes
 
 
@@ -238,15 +243,31 @@ def evaluate(actor: Actor, overrides: dict, scen: dict, n: int) -> dict:
 
 # ------------------------------------------------------------------------------------------------ PPO
 def gae(rew, val, done, gamma, lam):
-    """rew, done: (R, E). val: (R + 1, E). A match ends on time, so nothing is bootstrapped past `done`."""
+    """rew: (R, E, 5). done: (R, E). val: (R + 1, E, 5). A match ends on time, so nothing is bootstrapped past
+    `done`."""
     adv = np.zeros_like(rew)
     last = 0.0
     for t in reversed(range(len(rew))):
-        nd = 1.0 - done[t]
+        nd = 1.0 - done[t][:, None]
         delta = rew[t] + gamma * val[t + 1] * nd - val[t]
         last = delta + gamma * lam * nd * last
         adv[t] = last
     return adv, adv + val[:-1]
+
+
+def with_ids(state):
+    """(..., 5, S) -> (..., 5, S + 5): each player's row of the global state with his one-hot slot, the critic's input
+    when every player has his own value (reward.per_player)."""
+    eye = np.broadcast_to(np.eye(5, dtype=np.float32), state.shape[:-1] + (5,))
+    return np.concatenate([state, eye], -1)
+
+
+@torch.no_grad()
+def values(critic, state, per_player: bool):
+    """(E, S) global states -> (E, 5) values: one per player, or the team value five times."""
+    if per_player:
+        return critic(torch.as_tensor(with_ids(np.repeat(state[:, None], 5, axis=1)))).numpy()
+    return np.repeat(critic(torch.as_tensor(state)).numpy()[:, None], 5, axis=1)
 
 
 def to_sequences(x, S: int):
@@ -267,9 +288,10 @@ def ppo_update(actor, critic, opt_a, opt_c, buf, args, rng):
     obs, mask, act = (to_sequences(buf[k], S) for k in ("obs", "mask", "act"))
     logp_old = to_sequences(buf["logp"], S)
     reset = to_sequences(per_player(buf["reset"]), S)
-    state = to_sequences(per_player(buf["state"]), S)
-    adv = to_sequences(per_player(buf["adv"]), S)
-    ret = to_sequences(per_player(buf["ret"]), S)
+    state = per_player(buf["state"])
+    state = to_sequences(with_ids(state) if args.per_player else state, S)
+    adv = to_sequences(buf["adv"], S)
+    ret = to_sequences(buf["ret"], S)
     h0 = torch.as_tensor(buf["h"][::S].reshape(-1, buf["h"].shape[-1]))      # hidden state at each chunk start
     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
@@ -406,7 +428,8 @@ def train(args):
     o, _ = probe.reset(seed=0)
     obs_dim, n_act, state_dim = o["vec"].shape[1], o["mask"].shape[1], o["state"].shape[0]
     actor = Actor(obs_dim, n_act, args.hidden, args.actor == "gru")
-    critic = Critic(state_dim, args.hidden)
+    args.per_player = bool(cfg.reward.per_player)        # every player his own value and advantage
+    critic = Critic(state_dim + (5 if args.per_player else 0), args.hidden)
     opt_a = torch.optim.Adam(actor.parameters(), lr=args.lr_actor)
     opt_c = torch.optim.Adam(critic.parameters(), lr=args.lr_critic)
 
@@ -452,7 +475,7 @@ def train(args):
         return 1.0 if anneal_from is None else max(0.0, 1.0 - (step - anneal_from) / args.shaping_anneal_end)
 
     vec = VecEnv(E, args.workers, overrides, scen, int(rng.integers(2 ** 31)),
-                 ((obs_dim, n_act, state_dim), args.hidden, actor.recurrent))
+                 ((obs_dim, n_act, state_dim), args.hidden, actor.recurrent, args.per_player))
     next_eval = (step // args.eval_interval + 1) * args.eval_interval
     next_ckpt = (step // args.ckpt_interval + 1) * args.ckpt_interval
 

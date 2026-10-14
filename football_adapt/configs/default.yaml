@@ -19,7 +19,15 @@ actions:
   # A learning team is offered PASS_k only when no defender the passer can SEE could get to the ball: not by the
   # interception rule with `slack` extra steps in hand, and not by standing within `lane` m of the cut-out radius of
   # the ball's path. It is the test the scripted team makes before it passes. enabled: false = every pass is offered.
-  open_pass: {enabled: true, slack: 1.5, lane: 1.5}
+  # call: the receiver calls, so the defenders HE sees count as well as the passer's own (as opponent.attack.call
+  # for the scripted team). Off, three quarters of a trained team's interceptions came from defenders out of the
+  # passer's sight.
+  open_pass: {enabled: true, slack: 1.5, lane: 1.5, call: false}
+  # A learning player is offered SHOOT only when the shot is the best he can do. Within `far` m of goal, always.
+  # Further out, not when he could carry the ball closer (nobody within `pressed` m of him, nobody within `ahead` m
+  # in front of him: the scripted team carries on then), and not below a `min_chance` chance to score (the scripted
+  # team's own bar, attack.shoot_min). min_chance 0 = only the first test.
+  early_shot: {enabled: false, pressed: 6.0, ahead: 7.0, far: 14.0, min_chance: 0.3}
   # HOLD_SHAPE for a learning team sends the player to the spot a scripted player would hold: his home position, which
   # moves up, drops back and slides across with the ball as the scripted team's block does, and his supporting spot
   # while the team has the ball. Going for the ball stays the team's own choice. false = the bare formation anchor.
@@ -67,6 +75,12 @@ reward:
   w_formation: 0.002                  # per step, times how well our players stand on their HOLD_SHAPE spots (needs
   formation_dist: 15.0                # actions.shape_guide): 1 for a player on his spot, about a third at this many
                                       # metres. The player nearest the ball is not counted. 0 = off
+  w_chance: 0.0                       # times the change of the carrier's chance to score if he shot now, while we
+                                      # keep the ball: a possession earns how much better a chance it made (going
+                                      # back loses it again; nothing paid on winning, losing or shooting). 0 = off
+  per_player: false                   # true: w_formation is paid to each player for his own spot (not the team for
+                                      # their mean, and outside shape_cap), and the trainer gives every player his own
+                                      # value and advantage. Goals and every other term stay team rewards
   shape_cap: 5.0                      # cap on total |shaping| per episode
   shaping_weight: 1.0                 # lambda_t: the trainer anneals this toward 0
 

@@ -83,9 +83,19 @@ def compute_mask(env, team: int, idx: int, obs_partial: dict) -> np.ndarray:
             # a learning team is only offered the passes it can see are open (the scripted team checks for itself)
             if ok and env.cfg.actions.open_pass.enabled and env.controllers.get(team) is None:
                 mate = [j for j in range(5) if j != idx][a.arg]
-                ok = open_pass(env, team, env.pos[team][idx], env.pos[team][mate], obs_partial["opp_visible"])
+                seen = obs_partial["opp_visible"]
+                if env.cfg.actions.open_pass.call:         # the receiver calls: the defenders HE sees count too
+                    rho = env.vision_radius(team, mate)
+                    seen = seen | np.array([dist(env.pos[1 - team][j], env.pos[team][mate]) <= rho for j in range(5)])
+                ok = open_pass(env, team, env.pos[team][idx], env.pos[team][mate], seen)
         elif k == Kind.SHOOT:
             ok = has_ball and obs_partial["in_shoot_zone"]
+            # a learning player is offered only the shot that is the best he can do: close in, or a real chance he
+            # could not carry closer (actions.early_shot; judged with the defenders he sees)
+            if ok and env.cfg.actions.early_shot.enabled and env.controllers.get(team) is None:
+                L, W = env.L, env.W
+                defs = [to_frame(team, env.pos[1 - team][j], L, W) for j in range(5) if obs_partial["opp_visible"][j]]
+                ok = not env.early_shot(to_frame(team, env.pos[team][idx], L, W), defs, env.control(team, idx))
         elif k == Kind.TACKLE:
             ok = obs_partial["opp_carrier_close"]
         elif k == Kind.SHADOW:

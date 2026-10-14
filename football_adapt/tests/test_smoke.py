@@ -492,3 +492,106 @@ def test_the_rule_based_team_presses_with_two_and_only_makes_choices_its_mask_of
             assert all(obs["mask"][j][acts[j]] for j in range(5))
             obs, _, _, _ = env.step(acts)
         assert env.stats["invalid_actions"][0] == 0 and env.stats["shots"][0] + env.stats["passes"][0] > 0
+
+
+def test_attack_value_is_the_carriers_chance():
+    env = FootballEnv(load_config(overrides={"reward.w_chance": 1.0}))
+    env.reset(seed=0, start_team=0)
+    i = env.holder[1]
+    env.pos[0][i] = np.array([50.0, 30.0])
+    assert env.attack_value() == 0.0                            # out of shooting range
+    env.pos[0][i] = np.array([90.0, 30.0])                      # close to goal: a chance
+    assert 0.0 < env.attack_value() <= 1.0
+
+
+def test_attack_reward_is_off_by_default_and_paid_on_the_change_of_the_chance_when_on():
+    from football.actions import Kind
+    env = FootballEnv(load_config())
+    env.reset(seed=0, start_team=0)
+    env.step({})
+    assert env.attack_v is None
+    env = FootballEnv(load_config(overrides={"reward.w_chance": 1.0, "reward.w_progress": 0.0,
+                                             "reward.w_formation": 0.0}))
+    env.reset(seed=0, start_team=0)
+    stay = {j: env.space.index_of_kind(Kind.STAY) for j in range(5)}
+    env.step(stay)
+    v = env.attack_v
+    env.pos[0][env.holder[1]] = np.array([92.0, 30.0])           # in front of goal at once
+    _, _, _, info = env.step(stay)
+    if env.holder is not None and env.holder[0] == 0:
+        assert np.isclose(info["reward_parts"]["shaping"], env.attack_v - v) and env.attack_v > v
+
+
+def test_per_player_reward_pays_each_player_for_his_own_spot():
+    from football.actions import Kind
+    for pp in (False, True):
+        env = FootballEnv(load_config(overrides={"reward.per_player": pp, "reward.w_formation": 0.01}))
+        env.reset(seed=0, start_team=0)
+        stay = {j: env.space.index_of_kind(Kind.STAY) for j in range(5)}
+        for _ in range(3):
+            _, r, _, info = env.step(stay)
+        rp = info["reward_players"]
+        assert rp.shape == (5,)
+        if not pp:
+            assert np.allclose(rp, r)                           # the team reward for everyone, as before
+        else:
+            own = rp - r
+            assert (own >= 0).all() and (own > 0).sum() == 4    # the player nearest the ball is not paid
+            assert not np.allclose(own[own > 0], own[own > 0][0])   # each player by his own spot
+
+
+def test_gae_gives_each_player_his_own_advantage():
+    from training.train import gae
+    rew = np.zeros((3, 1, 5), np.float32)
+    rew[1, 0, 2] = 1.0                                          # only player 2 is paid
+    adv, ret = gae(rew, np.zeros((4, 1, 5), np.float32), np.zeros((3, 1), np.float32), 0.9, 1.0)
+    assert adv[0, 0, 2] > 0 and np.allclose(np.delete(adv, 2, axis=2), 0.0)
+
+
+def test_receiver_call_hides_a_pass_to_a_teammate_marked_out_of_the_passers_sight():
+    from football.actions import Kind
+    from football.observation import build_observation
+    for call in (False, True):
+        env = FootballEnv(load_config(overrides={"actions.open_pass.call": call}))
+        env.reset(seed=0, start_team=0)
+        i = env.holder[1]
+        mate = [k for k in range(5) if k != i][0]
+        env.pos[0] = np.array([[5.0, 5.0], [5.0, 55.0], [8.0, 8.0], [8.0, 52.0], [8.0, 30.0]])
+        env.pos[0][i], env.pos[0][mate] = np.array([20.0, 30.0]), np.array([55.0, 30.0])     # 35 m apart
+        env.pos[1] = np.array([[53.0, 30.0], [95.0, 5.0], [95.0, 55.0], [90.0, 30.0], [85.0, 10.0]])
+        o = build_observation(env, 0, i)                        # the man marking him is 33 m from the passer
+        assert not o.opp_visible[0]
+        assert o.mask[env.space.index_of_kind(Kind.PASS)] == (not call)
+
+
+def test_early_shot_is_one_he_could_have_carried_closer():
+    env = FootballEnv(load_config(overrides={"actions.early_shot.enabled": True}))
+    env.reset(seed=0)
+    far = [np.array([5.0, 5.0])] * 5
+    assert env.early_shot(np.array([75.0, 30.0]), far)                              # 25 m out, nobody near
+    assert not env.early_shot(np.array([85.0, 30.0]), far[:4] + [np.array([81.0, 33.0])])   # pressed, a 0.38 chance
+    assert not env.early_shot(np.array([85.0, 30.0]), far[:4] + [np.array([90.0, 26.0])])   # blocked, a 0.31 chance
+    assert env.early_shot(np.array([66.0, 30.0]), far[:4] + [np.array([63.0, 33.0])])       # pressed, 34 m: too poor
+    assert env.early_shot(np.array([75.0, 30.0]), far[:4] + [np.array([68.0, 30.0])])       # 7 m behind him: free
+    assert not env.early_shot(np.array([88.0, 30.0]), far)                          # 12 m out: close enough
+
+
+def test_a_learner_is_not_offered_an_early_shot_but_may_shoot_when_pressed():
+    from football.actions import Kind
+    from football.observation import build_observation
+    for on in (False, True):
+        env = FootballEnv(load_config(overrides={"actions.early_shot.enabled": on}))
+        env.reset(seed=0, start_team=0)
+        i = env.holder[1]
+        env.pos[0][i] = np.array([78.0, 30.0])                  # 22 m out
+        env.pos[1] = np.array([[40.0, 5.0], [40.0, 55.0], [45.0, 30.0], [50.0, 10.0], [50.0, 50.0]])
+        shoot = env.space.index_of_kind(Kind.SHOOT)
+        assert build_observation(env, 0, i).mask[shoot] == (not on)     # free, way ahead open: carry it closer
+        env.pos[1][2] = np.array([75.0, 33.0])                  # a defender on him: allowed if it is a real chance
+        o = build_observation(env, 0, i)
+        assert o.mask[shoot] == (not on or env.early_shot(np.array([78.0, 30.0]), [env.pos[1][2]]) is False)
+        env.pos[0][i] = np.array([66.0, 30.0])                  # 34 m out, pressed: under a 0.3 chance, not offered
+        env.pos[1][2] = np.array([63.0, 33.0])
+        assert build_observation(env, 0, i).mask[shoot] == (not on)
+        env.pos[0][i] = np.array([88.0, 30.0])                  # 12 m out: always offered
+        assert build_observation(env, 0, i).mask[shoot]

@@ -26,7 +26,7 @@ import torch.nn.functional as F
 from football import FootballEnv, load_config
 from agents.mappo import Actor, Critic, masked_dist
 from training.rules import rule_actions
-from training.train import set_overrides
+from training.train import set_overrides, with_ids
 
 SEED0 = 50_000                     # the matches use seeds 50000, 50001, ... (not the evaluation seeds of train.py)
 OPP_EPS = (0.0, 0.0, 0.1, 0.3)     # opponent randomness, match by match: half at full strength, the rest a little
@@ -52,9 +52,9 @@ def play(job):
         for j in range(5):                         # now and then a player does something else, so that the rules are
             if rng.random() < noise:               # also seen (and copied) in the situations a learner's mistakes lead to
                 do[j] = int(rng.choice(np.flatnonzero(obs["mask"][j])))
-        obs, r, done, _ = env.step(do)
-        R.append(r)
-    G, acc = np.zeros(len(R), np.float32), 0.0
+        obs, _, done, info = env.step(do)
+        R.append(info["reward_players"])           # each player's reward (all five the same unless reward.per_player)
+    G, acc = np.zeros((len(R), 5), np.float32), 0.0
     for t in reversed(range(len(R))):
         acc = R[t] + GAMMA * acc
         G[t] = acc
@@ -93,6 +93,12 @@ def main():
     torch.manual_seed(0)
     torch.set_num_threads(4)
     actor = Actor(O.shape[1], M.shape[1], args.hidden, False)
+    per_player = bool(load_config(overrides=overrides).reward.per_player)
+    if per_player:                                 # every player his own value: one row per player, with his slot
+        S = torch.as_tensor(with_ids(np.repeat(S.numpy()[:, None], 5, axis=1)).reshape(-1, S.shape[1] + 5))
+        G = G.reshape(-1)
+    else:
+        G = G[:, 0]
     critic = Critic(S.shape[1], args.hidden)
     opt_a = torch.optim.Adam(actor.parameters(), lr=1e-3)
     opt_c = torch.optim.Adam(critic.parameters(), lr=1e-3)
