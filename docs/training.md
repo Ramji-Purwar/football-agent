@@ -16,10 +16,6 @@ python -m training.train --name easy --total-steps 2000000 --workers --opp-eps-s
 # a grid of runs, one core each (here the Q1 grid with 3 seeds)
 python -m training.sweep --jobs 28 --formations 2-2-1,2-1-2,1-3-1,1-2-2,3-1-1 --radii 12,25,40,120 --zetas 0,1,2 \
        --seeds 0,1,2 -- --total-steps 5000000 --opp-eps-start 0.5
-# rule-based start (Section 7): copy the hand-written team, then train against the full-strength opponent
-python -m training.pretrain --out runs/warm.pt --set actions.context_mask=true
-python -m training.train --name warm --workers --init runs/warm.pt --critic-warmup 10 --entropy-coef 0.001 \
-       --shaping-anneal-end 1000000000 --eval-matches 50 --set actions.context_mask=true
 ```
 
 | What | How |
@@ -32,7 +28,7 @@ python -m training.train --name warm --workers --init runs/warm.pt --critic-warm
 | Any other config value | `--set key=value`, for example `--set reward.w_progress=0.005` (can be repeated) |
 | Actor | `--actor mlp` (memoryless) or `--actor gru`. The belief-augmented and oracle variants are not written yet |
 | Easy start | `--opp-eps-start 0.5`, see Section 7 |
-| Rule-based start | `training.pretrain` writes a file, `--init` starts from it, see Section 7 |
+| Training by whole matches | `--matches N --eval-every M`: every update is one full match of each game, so every choice is judged by what really followed it in that match (with `--lam 1.0`: the points that came after it, result included). N matches in all, an evaluation every M |
 | Evaluation | Every `--eval-interval` steps, `--eval-matches` matches on fixed seeds against the opponent at full strength; `--final-eval-matches` at the end |
 | Watching a trained team | `python -m scripts.pygame_render --ckpt runs/<name>/ckpt.pt` (it is the blue team). Add `--opp-eps 0.45` for the weakened opponent it trains against. `scripts.watch_match` takes the same two flags and writes a GIF |
 | Using a trained team in code | `MAPPOAgent.load("runs/<name>/ckpt.pt")` in `agents/mappo.py` has the same `act(obs)` as `RandomAgent` |
@@ -241,12 +237,12 @@ class MaskedCategorical:
 | `hidden_dim` | 256 | MLP and GRU hidden size |
 | `lr_actor` | 3e-4 | Adam optimizer |
 | `lr_critic` | 1e-3 | Adam optimizer (higher than actor) |
-| `gamma` | 0.99 | Discount factor |
+| `gamma` | 1.0 | Discount factor. 1: every choice is judged by the whole match, the result included (`game.md`, Section 9). 0.99 looks about 100 steps ahead |
 | `lam` | 0.95 | GAE lambda |
 | `clip_eps` | 0.2 | PPO clip range |
 | `n_epochs` | 5 | Update epochs per rollout (`--epochs`). 10 doubles the time spent in the update |
 | `batch_size` | 512 | Minibatch size (steps × players) |
-| `entropy_coef` | 0.01 | Entropy bonus coefficient. 0.001 with the rule-based start (Section 7) |
+| `entropy_coef` | 0.01 | Entropy bonus coefficient |
 | `value_coef` | 0.5 | Value loss weight |
 | `max_grad_norm` | 0.5 | Gradient clipping |
 | `SEQ_LEN` | 32 | GRU sequence chunk length |
@@ -310,7 +306,7 @@ What the first runs showed (one seed each, 2-2-1 against 2-2-1, memoryless actor
 
 So the easy start gets a team that attacks, and the trainer keeps the opponent at a level the team can just beat. Without passing, no team competed with the full-strength scripted team, and training longer did not get there: every long run stalled at an opponent that is 35% to 50% random. Keeping the shaping weight up keeps the attack alive (which is why the anneal now waits, Section 6), but it did not lift that ceiling. The carrier dribbled alone. What lifted it was making passing work (the last row): the team still loses more than it wins at full strength, but it now scores there and wins some matches.
 
-### Rule-based start: copy a hand-written team first (`--init`)
+### What the easy start does not learn
 
 The easy start gets a team that knows what to do with the ball and little else. Three of its teams were measured after 1M steps, over 28 full matches each against the full-strength opponent:
 
@@ -318,48 +314,7 @@ The easy start gets a team that knows what to do with the ball and little else. 
 - **The weakened opponent does not attack.** Against a sound defence the opponent at 50% random takes 0.0 shots a match, at 15% random 0.8, at full strength 3.5. While it is weak there is nothing to defend against, and the latest runs all stalled at an opponent that is 10 to 25% random.
 - **The signal is weak.** Goals are nearly all of the reward. A critic fitted afresh on matches of a trained team explains 12% of the goal return in matches it has not seen, and one update (2048 steps) holds about 7 goals.
 
-So a new policy is not asked to find a whole team by itself. It starts as a copy of one:
-
-1. **The rules** (`training/rules.py`). A team in about 25 lines, with the learner's own observation, mask and 23 actions. Without the ball the two players nearest to it go for it (`GO_TO_BALL`, `TACKLE` when in range) and the others `HOLD_SHAPE`. The carrier shoots at a chance of 30% or better. If not, he plays the open pass that gains the most ground (5 m or more), and if there is none, `DRIBBLE_GOAL`. Against the full-strength opponent: 0.9 goals for and 2.0 against a match (42 matches).
-2. **The copy** (`training/pretrain.py`). The rules play 96 matches against the scripted team. 15% of the choices are swapped for a random one, so that the rules are also seen in the situations a learner's mistakes lead to. The actor is trained to make the rules' choices, and the critic to predict the return of that play. It takes about 2 minutes, and the actor then makes the rules' choice on 97.5% of the steps kept aside.
-3. **PPO from there** (`training.train --init runs/warm.pt`), against the full-strength opponent from step 0: no `--opp-eps-start`.
-
-The settings that go with it (the commands are in Section 0):
-
-| Setting | What it does |
-|---|---|
-| `--entropy-coef 0.001` | With the default 0.01 the copy dissolves: the entropy climbs from 0.06 to 1.25 in 600k steps, and the team ends no better than the copy (table below) |
-| `--critic-warmup 10` | For the first 10 updates only the critic learns, so the copied actor is not moved before the critic can judge its play |
-| `--set actions.context_mask=true`, for `pretrain` and `train` alike | Off the ball a player chooses among `STAY`, `HOLD_SHAPE`, `GO_TO_BALL`, `TACKLE` and `SHADOW_j`, not among the 8 directions (`game.md`, Section 7). The trainer warns when the two commands were given different `--set` values |
-| `--shaping-anneal-end 1000000000` | Keeps the shaping weight at 1 |
-| `--eval-matches 50` | The goal difference spreads by about 1.6 goals from match to match, so the mean of 20 matches is uncertain by about 0.35 goals, the mean of 50 by about 0.2 |
-
-Only the entropy setting has been compared with its alternative. The other four are the recipe as it was run.
-
-**These results are against the opponent as it was before the receiver's call (`opponent.attack.call`, `opponent.md` Section 6.2).** That opponent passed to teammates marked by a defender the passer could not see, and the trained teams took the ball from 15 to 20 such passes a match. Against the opponent with the call, the two 2M-step teams score W 0.07 and 0.08 (60 matches each), so the numbers below show that the recipe trains a team, not how good a team is against today's opponent.
-
-Against the full-strength opponent (2-2-1 against 2-2-1, memoryless actor, 56 full matches a row unless it says otherwise, W = wins + draws / 2):
-
-| Team | Goals for – against | Wins-draws-losses | W |
-|---|---|---|---|
-| Easy start, 1M steps, three runs (28 matches each) | 0.5 to 1.1 – 4.2 to 5.5 | 0-1-27 to 1-0-27 | 0.02 to 0.04 |
-| Easy start with `context_mask`, 1M steps, one run (28 matches) | 0.75 – 2.64 | 4-2-22 | 0.18 |
-| The copy of the rules, not trained | 0.36 – 2.27 | 3-9-44 | 0.13 |
-| The copy + 600k steps with `--entropy-coef 0.01` | 0.57 – 2.59 | 5-6-45 | 0.14 |
-| The copy + 600k steps with `--entropy-coef 0.001`, seed 0 | 0.75 – 1.36 | 12-11-33 | 0.31 |
-| The same, seed 1 | 0.98 – 1.66 | 11-15-30 | 0.33 |
-| Seed 0 carried on to 1.5M steps | 1.11 – 1.34 | 15-16-25 | 0.41 |
-| The scripted team against itself (64 matches) | 1.34 – 1.41 | | 0.48 |
-
-With the lower entropy bonus the copy improves, on both seeds, and at 1.5M steps it is at the Stage 2 target (W above 0.4 within 2M steps). That last row is one seed. The trainer's own final evaluations, which are other matches, agree: W 0.31 (100 matches) and 0.33 (30 matches) at 600k steps, and 0.42 at 1.5M (30 matches).
-
-The rise is not steady. The training matches are against the full-strength opponent too. In those of seed 0, W by 100k steps was 0.21, 0.19, 0.21, 0.21, 0.14 and 0.24 up to 600k, then 0.28, 0.33, 0.43 and 0.54 up to 1M, and between 0.36 and 0.56 from there to 1.5M. Seed 1 was as flat for its first 500k steps (0.20 to 0.28) and reached 0.36 in the last 100k. The entropy climbs from 0.06 to about 0.6 over the first 500k steps and then settles. So a run of this kind shows little in its first 500k steps, and its evaluations move with it: for seed 0 they were 0.25 at 250k steps and 0.13 at 500k (50 matches each), before the 0.31 at 600k.
-
-What these teams do, and what they do not do yet:
-
-- **They defend.** The opponent gets 2.7 to 4.3 shots a match (7.6 to 11.1 against the easy-start teams), and the four players not nearest the ball stand 6 to 9 m from their spots (15 to 19 m).
-- **They do not build up.** They have the ball 21% of the time, complete 16 to 21 passes a match, and score from shots taken 32 m out at a chance of 8 to 9% (8 to 13 shots a match).
-- **Not written yet:** a copy for the recurrent actor (`pretrain` writes the memoryless one), and rules for structure level 0, which has no `HOLD_SHAPE`.
+A rule-based start was tried on 2026-10-13/14 and removed: the networks began as a copy of a hand-written team and PPO went on from there, at times held near the hand-written choices by an extra loss. The trained teams were never better than the rules they copied, and without that extra loss PPO made them worse (in two runs, from 0.5 goals a match to 0.02-0.25 between 1M and 2M steps). What such a team did was the rules' work, not something it had learned, so the method is not used.
 
 ### Stage 1: Sanity Check
 
@@ -371,7 +326,7 @@ Expected: random policy gets near-zero win rate within 100k steps. If not, the r
 
 Config: `T=1200`, single formation, `radius=25` (default), `zeta=2`.
 
-Expected: trained policy clearly beats random (win rate > 80%) and approaches heuristic baseline (win rate > 40% against heuristic) within 2M steps. The easy start has not reached this target (first table above). The rule-based start reached W 0.41 at 1.5M steps, on one seed (second table).
+Expected: trained policy clearly beats random (win rate > 80%) and approaches heuristic baseline (win rate > 40% against heuristic) within 2M steps. The easy start has not reached this target (the table above).
 
 **Check:** if the policy does not beat random after 2M steps:
 - Check that masks are applied correctly (high `invalid_actions` count = mask bug)
@@ -533,9 +488,8 @@ def evaluate(agent, cfg, n_matches=100):
 | No shots, `ball_their_third` under 0.1, many 0-0 draws | The opponent is too strong for a new policy to get near the goal | Use the easy start (`--opp-eps-start 0.5`) and keep `reward.w_progress` on |
 | High possession, `ball_own_third` above 0.5, draws | The team is hiding the ball in its own half | The scripted team goes and gets a parked ball (`opponent.hunt`, `opponent.md` 5.9): check `hunt.after` is not 0 |
 | Good against the weakened opponent, heavy defeats in the evaluations | The opponent has not been strengthened far enough yet | Train longer; watch `opp_eps` fall in `log.jsonl` |
-| Heavy defeats at full strength however long the run, the players off the ball wander | From random play only the carrier learns (Section 7) | Use the rule-based start: `training.pretrain`, then `--init` |
-| With `--init`: the entropy climbs and the team gets worse than the copy it started as | The entropy bonus undoes the copied policy | `--entropy-coef 0.001` |
-| The evaluations of one run jump about | 20 matches are too few, and with the rule-based start the team itself moves up and down by 0.1 in W between evaluations (Section 7) | `--eval-matches 50`, and judge a run over several evaluations |
+| Heavy defeats at full strength however long the run, the players off the ball wander | From random play only the carrier learns (Section 7) | Open: no fix yet |
+| The evaluations of one run jump about | 20 matches are too few | `--eval-matches 50`, and judge a run over several evaluations |
 | GRU not learning Q2 | Sequences too short | Increase `SEQ_LEN` to 64 or 128 |
 | Q2 belief filter beats recurrent | Hidden state not used | Check that hidden state is propagated (not reset each step) |
 | NaN loss | Learning rate too high | Reduce `lr_actor`, add gradient clipping |

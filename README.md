@@ -43,9 +43,7 @@ football_adapt/
 │   └── mappo.py                shared-policy MAPPO networks (MLP or GRU actor, central critic); needs torch
 ├── training/
 │   ├── train.py                one training run: rollouts, PPO update, evaluation, checkpoints, resume
-│   ├── sweep.py                a grid of training runs side by side, one core each
-│   ├── rules.py                a team played by a few hand-written rules over the learner's own 23 actions
-│   └── pretrain.py             rule-based start: an actor and a critic that begin as a copy of rules.py
+│   └── sweep.py                a grid of training runs side by side, one core each
 ├── scripts/
 │   ├── __init__.py
 │   ├── phase0_checks.py        the Phase 0 checks and the formation win matrix
@@ -87,9 +85,6 @@ python -m scripts.pygame_render --ckpt runs/stage2_easy_start/ckpt.pt        # w
 python -m pytest -q
 python -m training.train --name sanity --T 300 --radius 100 --total-steps 600000 --workers --opp-eps-start 0.5
 python -m training.sweep --jobs 28 --radii 12,25,40,120 --zetas 0,1,2 --seeds 0,1,2 -- --total-steps 5000000 --opp-eps-start 0.5
-# rule-based start (docs/training.md, Section 7): copy a hand-written team, then train at full strength
-python -m training.pretrain --out runs/warm.pt --set actions.context_mask=true
-python -m training.train --name warm --workers --init runs/warm.pt --critic-warmup 10 --entropy-coef 0.001 --shaping-anneal-end 1000000000 --eval-matches 50 --set actions.context_mask=true
 ```
 
 ## Things to know before you trust any result

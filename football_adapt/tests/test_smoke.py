@@ -657,7 +657,7 @@ def test_the_result_counts_for_more_than_all_small_terms_together():
     _, _, done, info = env.step(stay)
     r = env.cfg.reward
     assert done and np.isclose(info["reward_parts"]["terminal"], r.eta * r.scale)
-    assert r.eta > 5 * r.small_cap                                       # a win outweighs any sum of small terms
+    assert r.eta + r.goal > r.small_cap                                  # the result and the goals outweigh the small terms
 
 
 def test_a_loose_pass_picked_up_by_them_costs_the_passer():

@@ -10,6 +10,12 @@ Run from football_adapt/:
 made stronger step by step as our team gets ahead of it (see EPS_STEP below). The evaluations are always against
 the opponent at full strength. Against the full-strength opponent from step 0 a new policy never gets near the goal.
 
+--matches N trains by whole matches: every update is one full match of each game, from kick-off to the final
+whistle, so every choice is judged by what really followed it in that match (with --lam 1: the points that came
+after it, the result included, added up after the match). --eval-every sets the matches between evaluations:
+
+   python -m training.train --name r --workers --opp-eps-start 0.5 --matches 5000 --eval-every 500 --lam 1.0
+
 Everything goes to runs/<name>/: config.json, log.jsonl (one line per update and per evaluation), ckpt.pt and,
 when the run is finished, result.json. Running the SAME command again resumes from ckpt.pt, so a run survives a
 node that expires; with a larger --total-steps it carries a finished run on. Our formation, radius and structure
@@ -216,11 +222,15 @@ class VecEnv:
             p.join()
 
 
-def evaluate(actor: Actor, overrides: dict, scen: dict, n: int) -> dict:
-    """n full matches with fixed seeds. Returns the mean of every summary field, plus W = wins + draws / 2."""
+def _eval_matches(job):
+    """Some evaluation matches, each with its own fixed seed (one process of evaluate)."""
+    weights, dims, overrides, scen, seeds = job
+    torch.set_num_threads(1)
+    actor = Actor(*dims)
+    actor.load_state_dict(weights)
     env = FootballEnv(load_config(overrides=overrides))
     eps = []
-    for seed in range(EVAL_SEED0, EVAL_SEED0 + n):
+    for seed in seeds:
         obs, _ = env.reset(seed=seed, **sample_reset(scen, np.random.default_rng(seed)))
         env.set_shaping_weight(0.0)
         agent = MAPPOAgent(actor, seed=seed)
@@ -228,6 +238,22 @@ def evaluate(actor: Actor, overrides: dict, scen: dict, n: int) -> dict:
         while not done:
             obs, _, done, _ = env.step(agent.act(obs))
         eps.append(summary(env, 0.0))
+    return eps
+
+
+def evaluate(actor: Actor, overrides: dict, scen: dict, n: int, procs: int = 1) -> dict:
+    """n full matches with fixed seeds, played by `procs` processes side by side (the same matches either way).
+    Returns the mean of every summary field, plus W = wins + draws / 2."""
+    first = actor.encoder[0] if actor.recurrent else actor.body[0]
+    dims = (first.in_features, actor.head.out_features, actor.head.in_features, actor.recurrent)
+    seeds = list(range(EVAL_SEED0, EVAL_SEED0 + n))
+    jobs = [({k: v.detach().clone() for k, v in actor.state_dict().items()}, dims, overrides, scen, seeds[i::procs])
+            for i in range(max(1, min(procs, n)))]
+    if len(jobs) == 1:
+        eps = _eval_matches(jobs[0])
+    else:
+        with mp.Pool(len(jobs)) as pool:
+            eps = [e for part in pool.map(_eval_matches, jobs) for e in part]
     actor.train()
     out = {k: float(np.mean([e[k] for e in eps])) for k in eps[0]}
     out["W"] = out["win"] + 0.5 * out["draw"]
@@ -359,9 +385,14 @@ def parse_args(argv=None):
                     help="steps over which shaping falls to 0 (with the easy start: counted from full strength)")
     ap.add_argument("--opp-eps-start", type=float, default=None,
                     help="easy start: opponent randomness to begin with, see EPS_STEP (default: the opponent as configured)")
+    ap.add_argument("--matches", type=int, default=None,
+                    help="train by whole matches: this many matches in all (summed over the games), each update one "
+                         "full match of every game (sets --rollout-len to the match length and --total-steps)")
     # evaluation and checkpoints
+    ap.add_argument("--eval-every", type=int, default=400, help="with --matches: matches between evaluations")
     ap.add_argument("--eval-interval", type=int, default=250_000)
     ap.add_argument("--eval-matches", type=int, default=20)
+    ap.add_argument("--eval-procs", type=int, default=1, help="processes that play the evaluation matches side by side")
     ap.add_argument("--final-eval-matches", type=int, default=100)
     ap.add_argument("--ckpt-interval", type=int, default=50_000)
     args = ap.parse_args(argv)
@@ -402,6 +433,11 @@ def train(args):
         overrides["opponent.switching.mode"] = args.switching
     overrides.update(set_overrides(args.set))
     cfg = load_config(overrides=overrides)
+    if args.matches:                           # by whole matches: one update = one full match of every game
+        T = int(cfg.time.T)
+        if args.actor == "gru" and T % args.seq_len:
+            raise SystemExit(f"--matches with --actor gru needs a match length that is a multiple of --seq-len")
+        args.rollout_len, args.total_steps, args.eval_interval = T, args.matches * T, args.eval_every * T
     scen = dict(our_formation=args.our_formation or cfg.formations.ours, radius=args.radius, zeta=args.zeta,
                 opp_formations=args.opp_formations or [cfg.formations.opponent],
                 opp_styles=args.opp_styles or [cfg.styles.opponent], sigmas=args.sigmas)
@@ -463,6 +499,25 @@ def train(args):
     next_eval = (step // args.eval_interval + 1) * args.eval_interval
     next_ckpt = (step // args.ckpt_interval + 1) * args.ckpt_interval
 
+    t_start, step_start, last_eval = time.time(), step, None
+
+    def progress():
+        """runs/<name>/progress.txt: how far the run is, for a look at any time (cat it)."""
+        T_ = R if args.matches else cfg.time.T
+        done_m, total_m = step // T_, args.total_steps // T_
+        el = time.time() - t_start
+        rate = (step - step_start) / T_ / el if el > 0 else 0.0
+        left = max(0, total_m - done_m) / rate if rate > 0 else float("nan")
+        hms = lambda x: "?" if x != x else time.strftime("%H:%M:%S", time.gmtime(x))
+        txt = (f"{name}: {done_m:,} / {total_m:,} matches finished ({100 * done_m / max(total_m, 1):.1f}%), "
+               f"{rate * 60:.0f} matches a minute, elapsed {hms(el)}, about {hms(left)} left (evaluations not counted)\n")
+        if last_eval is not None:
+            txt += (f"last evaluation (after {last_eval[0]:,} matches, {last_eval[1]['matches']} matches at full strength): "
+                    f"W {last_eval[1]['W']:.2f}, goals {last_eval[1]['goals_for']:.2f} - "
+                    f"{last_eval[1]['goals_for'] - last_eval[1]['goal_diff']:.2f}\n")
+        with open(run / "progress.txt", "w") as f:
+            f.write(txt)
+
     while step < args.total_steps:
         t0, w = time.time(), shaping_w()
         buf, val, episodes = vec.rollout(actor, critic, R, (w, eps))
@@ -477,7 +532,8 @@ def train(args):
         if episodes:
             row.update({k: float(np.mean([e[k] for e in episodes])) for k in episodes[0]})
         write("train", **row)
-        print(f"[{name}] step {step:>9,}  {row['sps']:6.0f} steps/s  ent {row['entropy']:.2f}  v_loss {row['v_loss']:.4f}"
+        progress()
+        print(f"[{name}] " + (f"match {step // R:>6,}  " if args.matches else "") + f"step {step:>9,}  {row['sps']:6.0f} steps/s  ent {row['entropy']:.2f}  v_loss {row['v_loss']:.4f}"
               + (f"  win {row['win']:.2f}  goal_diff {row['goal_diff']:+.2f}  shaping {row['shaping_return']:+.2f}"
                  if episodes else "") + ("" if eps is None else f"  opp_eps {eps:.2f}"), flush=True)
         if eps is not None:                    # the easy start: see EPS_STEP at the top of this file
@@ -495,13 +551,14 @@ def train(args):
             checkpoint()
             next_ckpt = (step // args.ckpt_interval + 1) * args.ckpt_interval
         if step >= next_eval and step < args.total_steps:
-            ev = evaluate(actor, overrides, scen, args.eval_matches)
+            ev = evaluate(actor, overrides, scen, args.eval_matches, args.eval_procs)
             write("eval", **ev)
+            last_eval = (step // (R if args.matches else cfg.time.T), ev)
             print(f"[{name}] EVAL at {step:,}: W {ev['W']:.2f}  win {ev['win']:.2f}  goal_diff {ev['goal_diff']:+.2f}", flush=True)
             next_eval = (step // args.eval_interval + 1) * args.eval_interval
 
     vec.close()
-    ev = evaluate(actor, overrides, scen, args.final_eval_matches)
+    ev = evaluate(actor, overrides, scen, args.final_eval_matches, args.eval_procs)
     write("final", **ev)
     with open(done, "w") as f:
         json.dump({"name": name, "step": step, "args": vars(args), "scenario": scen, **ev}, f, indent=2)

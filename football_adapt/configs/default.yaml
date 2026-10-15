@@ -68,7 +68,8 @@ reward:
   # over a match, so a win always counts for more than any sum of them. "Own" terms go to the player who earned
   # them (per_player), the others to every player.
   scale: 0.001
-  eta: 1000.0                         # end of match: + for a win, - for a loss, 0 for a draw
+  eta: 0.0                            # end of match: + for a win, - for a loss, 0 for a draw (off: the goals already
+                                      # make the goal difference, so the result is not paid again)
   goal: 100.0                         # we score +, they score -
   small_cap: 50.0
   per_player: true                    # own terms to the player who earned them, and every player his own value and
@@ -205,6 +206,7 @@ opponent:
     # opponent seen within `lane` m of the ball's line; if none is seen, a point `lead` m ahead of the ball.
     close_down:    {enabled: true, lane: 6.0, lead: 15.0}
     counter:       {steps: 15, lead_mult: 1.6, fwd_mult: 1.5}          # after winning it, run further and pass forward early
+    call_help:     {enabled: true, trigger: 6.0}                        # carrier pressed: the nearest teammate comes to offer a pass
     assist:        {enabled: true}                                      # give it to a teammate with a clearly better shot
     box:           {x: 0.7, wide: 8.0, post_gap: 8.0, cutback_gap: 18.0}   # ball wide in the final third: far-post run + cut-back spot
     overlap:       {trigger: 12.0, ahead: 8.0, wide: 7.0, max_dev: 18.0}   # wide midfielder runs round the outside of the carrier
@@ -223,8 +225,10 @@ opponent:
   space:   {radius: 6.0, w_mates: 0.5, w_move: 0.2}   # off-ball attackers drift up to radius m toward free space (0 = off)
   carrier: {press_dist: 3.0, press_relief: 0.2, better_margin: 0.1,
             back_tol: 2.0, free_dist: 8.0, carry_free: 10.0, carry_step: 4.0,
-            release_dist: 6.0, release_shoot: 0.0}   # defender within release_dist: shoot (bar lowered) or pass to a free man now   # back passes only under pressure (defender within press_dist): to a teammate with no
-                                                  # visible defender within free_dist (and inside my own vision)
+            release_dist: 6.0, release_shoot: 0.0,    # defender within release_dist: shoot (bar lowered) or pass to a free man now
+            stall_steps: 30, stall_dist: 2.0}         # stood within stall_dist m with the ball for stall_steps: pass or clear (0 = off)
+  # back passes only under pressure (defender within press_dist): to a teammate with no visible defender within
+  # free_dist (and inside my own vision)
   # Hunt: zonal defence leaves a ball alone that stays outside every zone, so the other team could sit on it deep in
   # its own half for the rest of the match. The steps of one possession of theirs in which none of us is pressing the
   # ball are counted; past `after` the `n` nearest players leave their zones and go for it, until we have the ball

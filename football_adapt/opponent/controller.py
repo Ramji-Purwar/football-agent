@@ -47,6 +47,7 @@ class ScriptedTeam:
         self.prev_ball = None               # where the team saw the ball on the last step (to tell where a pass is going)
         self.unpressed = 0                  # steps of the other team's possession with none of us on the ball (see hunt)
         self.hunting = False                # they sat on it for too long: the nearest players are going to get it
+        self._hold = None                   # (where the carrier is standing, steps he has stood there with it): see stall
         self._lanes = {}                    # passing lanes cut on the last step: {player: point} (see lanes)
         self._tackle_idx = ActionSpace(cfg.actions.n_directions).index_of_kind(Kind.TACKLE)
 
@@ -132,6 +133,8 @@ class ScriptedTeam:
         self.cp_timer = max(0, self.cp_timer - 1)
         self.ca_timer = max(0, self.ca_timer - 1)
         self.mover_timer = max(0, self.mover_timer - 1)
+        if poss != OWN:
+            self._hold = None
         if poss == OTHER:
             self.poss_steps = 0
         elif poss == OWN or self.last_poss == OWN:                   # we hold it, or our own pass is in the air
@@ -222,7 +225,22 @@ class ScriptedTeam:
         closer = self._close_down(obs, pos, ball) if poss == LOOSE and self.last_poss == OTHER else None
         self.prev_ball = ball
         return dict(pos=pos, anchors=anchors, ball=ball, poss=poss, presser=presser, nearest=nearest, cover=cover,
-                    chasers=chasers, presser2=presser2, lanes=lanes, hunters=hunters, closer=closer)
+                    chasers=chasers, presser2=presser2, lanes=lanes, hunters=hunters, closer=closer,
+                    helper=self._help_call(obs, pos))
+
+    def _help_call(self, obs, pos):
+        """The carrier is under pressure (a defender he sees within call_help.trigger): he calls, and the teammate
+        nearest to him goes to a free spot beside him, so that he has somebody to pass to. (j, carrier position)"""
+        ch = self.mv.call_help
+        if not ch.enabled:
+            return None
+        for c, o in obs.items():
+            if o.has_ball:
+                defs = self._visible_defenders(o)
+                if defs and min(dist(d, o.pos) for d in defs) <= ch.trigger:
+                    mates = [j for j in obs if j != c]
+                    return min(mates, key=lambda j: (dist(pos[j], o.pos), j)), o.pos
+        return None
 
     def _close_down(self, obs, pos, ball):
         """Their pass is in the air: (player, point) for the one of us who goes to meet the receiver, or None.
@@ -485,6 +503,18 @@ class ScriptedTeam:
             if not (alone and dist(pos, self.goal) > self.at.shoot_close):
                 return Action(Kind.SHOOT)
             return Action(Kind.DRIBBLE_GOAL)
+        # a carrier who has stood with the ball for stall_steps (blocked, nobody to pass to, nobody tackling) must
+        # not wait for ever: the best safe pass if there is one, else he clears it
+        stall = self.cr.stall_steps
+        if stall > 0:
+            if self._hold is None or dist(self._hold[0], pos) > self.cr.stall_dist:
+                self._hold = (pos.copy(), 0)
+            else:
+                self._hold = (self._hold[0], self._hold[1] + 1)
+            if self._hold[1] >= stall:
+                if cands:
+                    return self._pass_act(max(cands, key=lambda c: (c[0], c[1], c[2])))
+                return Action(Kind.CLEAR, self._clear_target(o, defs))
         # 2. pass forward or square: best safe teammate; under pressure the bar is lower. Never backward here.
         fwd_cands = [c for c in cands if o.teammate_pos[c[2]][0] >= pos[0] - self.cr.back_tol]
         if fwd_cands:
@@ -556,6 +586,8 @@ class ScriptedTeam:
         # pass and move: I just passed, so I keep running forward for a few steps (the return pass makes a one-two)
         if j == self.mover and self.mover_timer > 0:
             return spot(np.array([min(o.pos[0] + mv.pass_move.run, L - self.run.goal_gap), o.pos[1]]))
+        if ctx["helper"] is not None and ctx["helper"][0] == j:      # the carrier is pressed and calls: show for it
+            return MOVE_TO(self._free_spot(o, self._offer_target(o, home, ctx["helper"][1])))
         if carrier is not None:
             c_side = np.sign(carrier[1] - W / 2)
             wide = abs(carrier[1] - W / 2) > mv.box.wide
