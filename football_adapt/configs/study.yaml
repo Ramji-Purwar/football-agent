@@ -1,0 +1,47 @@
+# ======================================================================
+# study.yaml: the recipe of the Q1-Q3 study (docs/questions.md), decided 2026-10-18.
+# Every value here overrides configs/default.yaml for a training run:
+#   python -m training.train --recipe configs/study.yaml ...
+# The run keeps these values with its checkpoints, so the viewers replay it in the same game.
+# ======================================================================
+
+reward:
+  # Goals (+-100 points, the whole team) and potential-based shaping, nothing else. The shaping pays the change of
+  # Phi = where the ball is (-10 at our goal line to +10 at theirs) + 30 x the carrier's chance to score (ours +,
+  # theirs -). It cannot be farmed (passing back and forth, holding the ball, long shots all earn nothing), a lost
+  # ball gives back what the possession earned, and it never needs fading (it leaves the best play unchanged).
+  potential: {ball: 10.0, chance: 30.0}
+  eta: 0.0
+  goal: 100.0
+  per_player: false                   # every player gets the team's reward
+  small_cap: 0.0                      # no cap: the shaping is bounded by Phi itself
+  # every older term off
+  w_pass_done: 0.0
+  w_pass_accuracy: 0.0
+  w_receive: 0.0
+  w_free: 0.0
+  w_turnover: 0.0
+  w_progress: 0.0
+  w_assist: 0.0
+  w_hold: 0.0
+  w_chance: 0.0
+  w_shot: 0.0
+  w_big_chance: 0.0
+  w_poor_shot: 0.0
+  w_missed_shot: 0.0
+  w_chance_against: 0.0
+  w_shot_against: 0.0
+  w_tackle: 0.0
+  w_interception: 0.0
+  w_open_lanes: 0.0
+  w_formation: 0.0
+
+actions:
+  # Off the ball every structure level walks freely (the 8 directions, STAY, GO_TO_BALL, TACKLE, SHADOW); zeta 1-2
+  # add HOLD_SHAPE. On the ball: the directions, STAY, PASS, THROUGH, DRIBBLE_GOAL and SHOOT.
+  context_mask: true
+  walk_off_ball: true
+  # HOLD_SHAPE goes to the player's own formation spot (it moves up with the ball and drops back without it), not to
+  # where a scripted player would stand
+  shape_guide: false
+  open_pass: {call: true}             # the receiver's call, as in every run since 2026-10-14

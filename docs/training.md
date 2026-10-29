@@ -28,8 +28,10 @@ python -m training.sweep --jobs 28 --formations 2-2-1,2-1-2,1-3-1,1-2-2,3-1-1 --
 | Any other config value | `--set key=value`, for example `--set reward.w_progress=0.005` (can be repeated) |
 | Actor | `--actor mlp` (memoryless) or `--actor gru`. The belief-augmented and oracle variants are not written yet |
 | Easy start | `--opp-eps-start 0.5`, see Section 7 |
-| Training by whole matches | `--matches N --eval-every M`: every update is one full match of each game, so every choice is judged by what really followed it in that match (with `--lam 1.0`: the points that came after it, result included). N matches in all, an evaluation every M |
-| Evaluation | Every `--eval-interval` steps, `--eval-matches` matches on fixed seeds against the opponent at full strength; `--final-eval-matches` at the end |
+| Training by whole matches | `--matches N --eval-every M`: every update is one full match of each game. N matches in all, an evaluation every M. (`--lam 1.0` with it, tried in October 2026, judged every choice by the whole rest of the match and never won a match in 55,000) |
+| Study recipe | `--recipe configs/study.yaml`: the config values of the Q1-Q3 study (`docs/questions.md`): goals plus potential-based shaping only (`game.md`, Section 9), the 8 directions off the ball at every structure level, HOLD_SHAPE to the player's own formation spot. `--set` values win over it |
+| Evaluation | Every `--eval-interval` steps, `--eval-matches` matches on fixed seeds (10000, ...) against the opponent at full strength. Every evaluation keeps its checkpoint in `runs/<name>/ckpts/`; at the end the best of them plays `--test-matches` (300) matches on seeds no evaluation used (50000, ...), and that is the run's result in `result.json` |
+| Watching the learning | Every update logs `ev_return` (how much of the return that really followed the critic explains: near 0 means it carries no credit back to earlier choices), `approx_kl` and `clip_frac` (how far the update moved the policy) |
 | Watching a trained team | `python -m scripts.pygame_render --ckpt runs/<name>/ckpt.pt` (it is the blue team). Add `--opp-eps 0.45` for the weakened opponent it trains against. `scripts.watch_match` takes the same two flags and writes a GIF |
 | Using a trained team in code | `MAPPOAgent.load("runs/<name>/ckpt.pt")` in `agents/mappo.py` has the same `act(obs)` as `RandomAgent` |
 
@@ -237,8 +239,9 @@ class MaskedCategorical:
 | `hidden_dim` | 256 | MLP and GRU hidden size |
 | `lr_actor` | 3e-4 | Adam optimizer |
 | `lr_critic` | 1e-3 | Adam optimizer (higher than actor) |
-| `gamma` | 1.0 | Discount factor. 1: every choice is judged by the whole match, the result included (`game.md`, Section 9). 0.99 looks about 100 steps ahead |
+| `gamma` | 0.99 | Discount factor: looks about 100 steps ahead. It was 1.0 until 2026-10-18; a critic fitted afresh on 18 matches then explained nothing of the return in 6 others (explained variance -0.02), against 0.30 at 0.99 and 0.43 at 0.98, so at 1.0 no credit reached choices more than about 20 steps before a reward |
 | `lam` | 0.95 | GAE lambda |
+| `value_norm` | on | The critic's targets are normalised by their running mean and spread (MAPPO); `--no-value-norm` turns it off |
 | `clip_eps` | 0.2 | PPO clip range |
 | `n_epochs` | 5 | Update epochs per rollout (`--epochs`). 10 doubles the time spent in the update |
 | `batch_size` | 512 | Minibatch size (steps × players) |

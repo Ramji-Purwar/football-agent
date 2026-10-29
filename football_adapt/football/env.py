@@ -77,6 +77,9 @@ class FootballEnv:
         self.small_total = np.zeros(5)     # each player's small terms so far this match (capped at reward.small_cap)
         self.free_paid = np.zeros(5)       # points each player has had this match for being free (reward.free_cap)
         self.passes_paid = 0               # completed passes of ours paid so far (reward.pass_count_cap)
+        self.pass_done = False             # a pass of ours was completed this step (progress is paid for passes only)
+        self.assist = None                 # (passer, receiver, step) of our last completed pass (reward.w_assist)
+        self.hold = (None, 0)              # (our carrier, steps he has had the ball in a row) (reward.w_hold)
         self.their_v = None                # their carrier's chance when last charged for it (None = not theirs)
         self.lost_from = None              # our player whose pass went loose: if they pick it up, he lost it
         self.event_log = []
@@ -96,6 +99,7 @@ class FootballEnv:
 
         first = int(self.rng.integers(0, 2)) if start_team is None else int(start_team)
         self._kickoff(first)
+        self.phi = self.potential()        # Phi of the potential-based shaping at kick-off (reward.potential)
         return self._obs_out(), self._info([], None, {"team": 0.0, "shaping": 0.0, "terminal": 0.0})
 
     def _new_stats(self):
@@ -143,7 +147,15 @@ class FootballEnv:
             return float("inf")
         return self.radius[team]
 
+    def pass_speed(self, team, idx) -> float:
+        if team == 1 and self.sigma_idx is not None and idx == self.sigma_idx:
+            return self.cfg.speeds["pass"] * self.cfg.opponent.playmaker.pass_speed
+        return self.cfg.speeds["pass"]
+
     def control(self, team, idx) -> float:
+        pm = self.cfg.opponent.playmaker.control
+        if team == 1 and self.sigma_idx is not None and idx == self.sigma_idx and pm > 0:
+            return float(pm)
         cc = self.cfg.control
         anchor = self.anchors[team][idx] if self.zeta[team] >= 2 else None
         return control_rating(self.pos[team][idx], anchor, self.zeta[team], cc.c_min, cc.l_ctrl)
@@ -214,6 +226,7 @@ class FootballEnv:
         ev = []
         shaping = 0.0                      # team shaping this step, in points (reward.scale turns points into reward)
         self._own = np.zeros(5)
+        self.pass_done = False
         goal_by = None
         switch_event = None
         self.shadow_targets = []
@@ -381,7 +394,7 @@ class FootballEnv:
         # One pass is paid for at most progress_pass_cap metres, so that three passes up the pitch earn more than
         # one long ball over the same ground.
         if goal_by is None and self.holder is not None and self.holder[0] == 0:
-            if self.progress_x is not None:
+            if self.progress_x is not None and (c.reward.progress_carry or self.pass_done):
                 gain = self.ball_pos[0] - self.progress_x
                 if c.reward.progress_pass_cap > 0:
                     gain = min(gain, c.reward.progress_pass_cap)
@@ -437,6 +450,15 @@ class FootballEnv:
         # open lanes: every step they have the ball, a cost per pass their carrier has open (none of us would get to
         # it), charged to the player of ours nearest that lane: he should be standing in it. Closing their lanes and
         # winning the ball back both lower it; letting them keep the ball raises it
+        # holding: the same carrier of ours with the ball for more than hold_free steps in a row pays w_hold a step
+        if self.holder is not None and self.holder[0] == 0:
+            who, n = self.hold
+            n = n + 1 if who == self.holder[1] else 1
+            self.hold = (self.holder[1], n)
+            if c.reward.w_hold and n > c.reward.hold_free:
+                self._pay(self.holder[1], c.reward.w_hold)
+        else:
+            self.hold = (None, 0)
         if c.reward.w_open_lanes and self.holder is not None and self.holder[0] == 1:
             for j, danger in self.open_lane_blame():
                 self._pay(j, c.reward.w_open_lanes * danger)
@@ -463,14 +485,20 @@ class FootballEnv:
         ad = np.mean([dist(self.pos[1][j], self.anchors[1][j]) for j in range(5)])
         self.opp_anchor_dist.append(float(ad))
 
+        # potential-based shaping (reward.potential): gamma * Phi(after) - Phi(before), the same for every player of ours.
+        # It is outside the shaping weight and the cap: it never needs fading. Phi is 0 after the final whistle
+        phi = 0.0 if self.t + 1 >= self.T else self.potential()
+        pbrs = c.reward.potential.gamma * phi - self.phi
+        self.phi = phi
+
         self.t += 1
         terminal = 0.0
         if self.t >= self.T:
             self.done = True
             terminal = c.reward.eta * float(np.sign(self.score[0] - self.score[1]))
         sc = c.reward.scale                        # points -> reward
-        players = (team_r + terminal + small) * sc
-        parts = {"team": team_r * sc, "shaping": float(small.mean()) * sc, "terminal": terminal * sc}
+        players = (team_r + terminal + small + pbrs) * sc
+        parts = {"team": team_r * sc, "shaping": (float(small.mean()) + pbrs) * sc, "terminal": terminal * sc}
         reward = float(players.mean())
         info = self._info(ev, switch_event, parts)
         info["reward_players"] = players.astype(np.float32)   # each player's own reward
@@ -478,16 +506,29 @@ class FootballEnv:
         return self._obs_out(), reward, self.done, info
 
     def attack_value(self) -> float:
-        """How good a chance our carrier has (reward.w_chance): w_chance x his chance to score if he shot now,
-        0 out of shooting range. From the game's own state: every opponent counts, seen or not."""
+        """How good a chance our carrier has (reward.w_chance): w_chance x his chance to score if he shot now."""
+        return float(self.cfg.reward.w_chance * self.our_value())
+
+    def our_value(self) -> float:
+        """Our carrier's chance to score if he shot now (0 out of range), from the game's own state: every opponent
+        counts, seen or not. The mirror of their_value."""
         m = self.cfg.mechanics
         i, goal = self.holder[1], np.array([self.L, self.W / 2])
         me = self.pos[0][i]                                   # team 0's frame is the world frame
         if dist(me, goal) > m.shoot_max:
             return 0.0
-        p = shot_probability(me, goal, [self.pos[1][j] for j in range(5)], self.control(0, i),
-                             m.p_max, m.d0, m.shot_block_scale, sure_goal(m))
-        return float(self.cfg.reward.w_chance * p)
+        return float(shot_probability(me, goal, [self.pos[1][j] for j in range(5)], self.control(0, i),
+                                      m.p_max, m.d0, m.shot_block_scale, sure_goal(m)))
+
+    def potential(self) -> float:
+        """Phi of the potential-based shaping (reward.potential), in points: ball x where the ball is (-1 at our goal
+        line, +1 at theirs, whoever has it) + chance x the carrier's chance to score if he shot now (ours +, theirs -;
+        nothing while the ball is loose or in flight)."""
+        pot = self.cfg.reward.potential
+        phi = pot.ball * float((self.ball_pos[0] - self.L / 2) / (self.L / 2))
+        if pot.chance and self.holder is not None:
+            phi += pot.chance * (self.our_value() if self.holder[0] == 0 else -self.their_value())
+        return phi
 
     # ------------------------------------------------------------------ movement targets
     def _target(self, team, i, a: Action):
@@ -533,14 +574,14 @@ class FootballEnv:
         defenders = [(j, self.pos[other][j]) for j in range(5)
                      if self.frozen[other][j] == 0 and (c.vision.ball_always or
                                                         dist(self.pos[other][j], passer) <= self.vision_radius(other, j))]
-        res = pass_interception(passer, target, defenders, c.speeds["pass"],
-                                c.speeds.player, m.intercept_margin)
+        v_pa = self.pass_speed(team, idx)
+        res = pass_interception(passer, target, defenders, v_pa, c.speeds.player, m.intercept_margin)
         if res is not None:
             key, q, _ = res
             end, designated, predicted = q, (other, key), "intercepted"
         else:
             end, designated, predicted = target, (team, recv), "completed"
-        n = max(1, math.ceil(dist(passer, end) / c.speeds["pass"]))
+        n = max(1, math.ceil(dist(passer, end) / v_pa))
         self.flight = dict(start=passer, end=np.asarray(end, float), n=n, k=0, passer=(team, idx),
                            designated=designated, intended=(team, recv), predicted=predicted)
         self.holder = None
@@ -613,6 +654,9 @@ class FootballEnv:
             if dt == team:
                 self.stats["passes_completed"][team] += 1
                 result = "completed"
+                if team == 0:
+                    self.pass_done = True
+                    self.assist = (idx, di, self.t)
                 if team == 0:                      # ours: the passer (the first pass_count_cap of the match), and
                     if self.passes_paid < c.reward.pass_count_cap:      # the receiver of a forward one
                         self._pay(idx, c.reward.w_pass_done)
@@ -696,6 +740,11 @@ class FootballEnv:
         if team != 0:
             return r.w_shot_against * float(p)
         self._pay(idx, r.w_shot * float(p) + (r.w_big_chance if p >= r.big_chance else 0.0))
+        if r.w_assist and self.assist is not None:
+            passer, receiver, t0 = self.assist
+            if receiver == idx and passer != idx and self.t - t0 <= r.assist_steps:
+                self._pay(passer, r.w_assist * float(p))     # his pass made that shot
+            self.assist = None
         return 0.0
 
     def called_defenders(self, team, i, k):

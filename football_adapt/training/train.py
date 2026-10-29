@@ -11,14 +11,18 @@ made stronger step by step as our team gets ahead of it (see EPS_STEP below). Th
 the opponent at full strength. Against the full-strength opponent from step 0 a new policy never gets near the goal.
 
 --matches N trains by whole matches: every update is one full match of each game, from kick-off to the final
-whistle, so every choice is judged by what really followed it in that match (with --lam 1: the points that came
-after it, the result included, added up after the match). --eval-every sets the matches between evaluations:
+whistle. --eval-every sets the matches between evaluations. --recipe loads a file of config values: the study of
+docs/questions.md uses configs/study.yaml, e.g. its first Q1 setting:
 
-   python -m training.train --name r --workers --opp-eps-start 0.5 --matches 5000 --eval-every 500 --lam 1.0
+   python -m training.train --name v1 --recipe configs/study.yaml --zeta 1 --radius 25 \
+          --opp-formations 2-2-1,2-1-2,1-3-1,3-1-1 --opp-eps-start 0.5 --workers --n-envs 48 --batch-size 1024 \
+          --matches 20000 --eval-every 1000 --eval-matches 50
 
-Everything goes to runs/<name>/: config.json, log.jsonl (one line per update and per evaluation), ckpt.pt and,
-when the run is finished, result.json. Running the SAME command again resumes from ckpt.pt, so a run survives a
-node that expires; with a larger --total-steps it carries a finished run on. Our formation, radius and structure
+Everything goes to runs/<name>/: config.json, log.jsonl (one line per update, per evaluation and for the test),
+ckpt.pt (to resume), ckpts/ and, when the run is finished, result.json. Every evaluation (seeds 10000, 10001, ...)
+keeps its checkpoint in ckpts/. At the end the best of them plays --test-matches matches on seeds no evaluation used
+(50000, ...), and that is the run's result. Running the SAME command again resumes from ckpt.pt, so a run survives
+a node that expires; with a larger --total-steps it carries a finished run on. Our formation, radius and structure
 level are fixed for a run; the opponent's formation, style and playmaker are drawn fresh at every kick-off from the
 lists given.
 
@@ -43,6 +47,7 @@ from football import FootballEnv, load_config
 from agents.mappo import Actor, Critic, MAPPOAgent, masked_dist
 
 EVAL_SEED0 = 10_000        # evaluation matches use seeds 10000, 10001, ... for every run (paired comparisons)
+TEST_SEED0 = 50_000        # the test of a run's best checkpoint: seeds no evaluation used, so the pick does not flatter it
 
 # The easy start (--opp-eps-start): each opponent player acts at random with probability eps (opponent.md,
 # opponent.randomness.eps_opp). After every EPS_WINDOW training matches our win score (wins + draws / 2) is looked
@@ -54,10 +59,14 @@ EPS_STEP, EPS_WINDOW, EPS_HARDER, EPS_EASIER = 0.05, 50, 0.6, 0.4
 # ---------------------------------------------------------------------------------------------- the games
 def sample_reset(scen: dict, rng) -> dict:
     """reset() arguments for one match. Fixed things are passed through, lists are drawn from."""
-    return dict(our_formation=scen["our_formation"], radius=scen["radius"], zeta=scen["zeta"],
-                opp_formation=scen["opp_formations"][rng.integers(len(scen["opp_formations"]))],
-                opp_style=scen["opp_styles"][rng.integers(len(scen["opp_styles"]))],
-                sigma=int(scen["sigmas"][rng.integers(len(scen["sigmas"]))]))
+    ours = scen.get("our_formations") or [scen["our_formation"]]
+    out = dict(our_formation=ours[rng.integers(len(ours))], radius=scen["radius"], zeta=scen["zeta"],
+               opp_formation=scen["opp_formations"][rng.integers(len(scen["opp_formations"]))],
+               opp_style=scen["opp_styles"][rng.integers(len(scen["opp_styles"]))],
+               sigma=int(scen["sigmas"][rng.integers(len(scen["sigmas"]))]))
+    if scen.get("cases"):                      # formation and playmaker drawn together
+        out["opp_formation"], out["sigma"] = scen["cases"][rng.integers(len(scen["cases"]))]
+    return out
 
 
 def summary(env, shaping: float) -> dict:
@@ -241,12 +250,12 @@ def _eval_matches(job):
     return eps
 
 
-def evaluate(actor: Actor, overrides: dict, scen: dict, n: int, procs: int = 1) -> dict:
-    """n full matches with fixed seeds, played by `procs` processes side by side (the same matches either way).
-    Returns the mean of every summary field, plus W = wins + draws / 2."""
+def evaluate(actor: Actor, overrides: dict, scen: dict, n: int, procs: int = 1, seed0: int = EVAL_SEED0) -> dict:
+    """n full matches with fixed seeds (seed0, seed0 + 1, ...), played by `procs` processes side by side (the same
+    matches either way). Returns the mean of every summary field, plus W = wins + draws / 2."""
     first = actor.encoder[0] if actor.recurrent else actor.body[0]
     dims = (first.in_features, actor.head.out_features, actor.head.in_features, actor.recurrent)
-    seeds = list(range(EVAL_SEED0, EVAL_SEED0 + n))
+    seeds = list(range(seed0, seed0 + n))
     jobs = [({k: v.detach().clone() for k, v in actor.state_dict().items()}, dims, overrides, scen, seeds[i::procs])
             for i in range(max(1, min(procs, n)))]
     if len(jobs) == 1:
@@ -262,6 +271,48 @@ def evaluate(actor: Actor, overrides: dict, scen: dict, n: int, procs: int = 1) 
 
 
 # ------------------------------------------------------------------------------------------------ PPO
+class ValueNorm:
+    """Running mean and spread of the critic's targets (MAPPO's value normalisation). The critic learns targets of
+    about unit size; its outputs are scaled back with denormalize before they are used."""
+
+    def __init__(self, beta: float = 0.99999):
+        self.beta, self.mean, self.mean_sq, self.debias = beta, 0.0, 0.0, 0.0
+
+    def update(self, x):
+        x = np.asarray(x, np.float64)
+        self.mean = self.beta * self.mean + (1.0 - self.beta) * float(x.mean())
+        self.mean_sq = self.beta * self.mean_sq + (1.0 - self.beta) * float((x ** 2).mean())
+        self.debias = self.beta * self.debias + (1.0 - self.beta)
+
+    def stats(self):
+        """(mean, spread) so far; (0, 1) before the first update, so that nothing is scaled."""
+        if self.debias == 0.0:
+            return 0.0, 1.0
+        m = self.mean / self.debias
+        return m, float(np.sqrt(max(self.mean_sq / self.debias - m * m, 1e-8)))
+
+    def normalize(self, x):
+        m, s = self.stats()
+        return ((np.asarray(x) - m) / s).astype(np.float32)
+
+    def denormalize(self, x):
+        m, s = self.stats()
+        return (np.asarray(x) * s + m).astype(np.float32)
+
+    def state(self) -> dict:
+        return dict(beta=self.beta, mean=self.mean, mean_sq=self.mean_sq, debias=self.debias)
+
+    def load(self, d: dict):
+        self.beta, self.mean, self.mean_sq, self.debias = d["beta"], d["mean"], d["mean_sq"], d["debias"]
+
+
+def explained_variance(y, v) -> float:
+    """1 - Var(y - v) / Var(y): how much of y the critic's values v explain (1 all, 0 nothing, below 0 worse than a
+    constant)."""
+    vy = float(np.var(y))
+    return float(1.0 - np.var(np.asarray(y) - np.asarray(v)) / vy) if vy > 0 else float("nan")
+
+
 def gae(rew, val, done, gamma, lam):
     """rew: (R, E, 5). done: (R, E). val: (R + 1, E, 5). A match ends on time, so nothing is bootstrapped past
     `done`."""
@@ -303,7 +354,7 @@ def per_player(x):
     return np.repeat(x[:, :, None], 5, axis=2)
 
 
-def ppo_update(actor, critic, opt_a, opt_c, buf, args, rng):
+def ppo_update(actor, critic, opt_a, opt_c, buf, args, rng, vnorm):
     S = args.seq_len if actor.recurrent else 1
     obs, mask, act = (to_sequences(buf[k], S) for k in ("obs", "mask", "act"))
     logp_old = to_sequences(buf["logp"], S)
@@ -311,19 +362,20 @@ def ppo_update(actor, critic, opt_a, opt_c, buf, args, rng):
     state = per_player(buf["state"])
     state = to_sequences(with_ids(state) if args.per_player else state, S)
     adv = to_sequences(buf["adv"], S)
-    ret = to_sequences(buf["ret"], S)
+    ret = to_sequences(vnorm.normalize(buf["ret"]), S)                       # the critic learns normalised targets
     h0 = torch.as_tensor(buf["h"][::S].reshape(-1, buf["h"].shape[-1]))      # hidden state at each chunk start
     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
     N, B = obs.shape[0], max(1, args.batch_size // S)
-    stats = []
-    for _ in range(args.epochs):
+    stats, last = [], []
+    for epoch in range(args.epochs):
         perm = rng.permutation(N)
         for i in range(0, N, B):
             b = torch.as_tensor(perm[i:i + B])
             logits, _ = actor(obs[b], h0[b], reset[b])
             dist = masked_dist(logits, mask[b])
-            ratio = (dist.log_prob(act[b]) - logp_old[b]).exp()
+            log_ratio = dist.log_prob(act[b]) - logp_old[b]
+            ratio = log_ratio.exp()
             pi_loss = -torch.min(ratio * adv[b], ratio.clamp(1 - args.clip, 1 + args.clip) * adv[b]).mean()
             ent = dist.entropy().mean()
             v_loss = F.mse_loss(critic(state[b]), ret[b])
@@ -334,8 +386,15 @@ def ppo_update(actor, critic, opt_a, opt_c, buf, args, rng):
             torch.nn.utils.clip_grad_norm_(critic.parameters(), args.max_grad_norm)
             opt_a.step()
             opt_c.step()
+            with torch.no_grad():                  # how far the policy has moved from the one that played the matches
+                kl = ((ratio - 1) - log_ratio).mean().item()
+                clipped = ((ratio - 1).abs() > args.clip).float().mean().item()
             stats.append((pi_loss.item(), v_loss.item(), ent.item()))
-    return dict(zip(("pi_loss", "v_loss", "entropy"), np.mean(stats, axis=0).tolist()))
+            if epoch == args.epochs - 1:
+                last.append((kl, clipped))
+    out = dict(zip(("pi_loss", "v_loss", "entropy"), np.mean(stats, axis=0).tolist()))
+    out["approx_kl"], out["clip_frac"] = np.mean(last, axis=0).tolist()          # in the last epoch: the whole move
+    return out
 
 
 # ----------------------------------------------------------------------------------------------- main
@@ -351,13 +410,18 @@ def parse_args(argv=None):
     ap.add_argument("--actor", choices=["mlp", "gru"], default="mlp")
     # the setting (None = the value in configs/default.yaml)
     ap.add_argument("--our-formation", default=None)
+    ap.add_argument("--our-formations", type=csv, default=None, help="comma list, one is drawn per match for our team")
     ap.add_argument("--opp-formations", type=csv, default=None, help="comma list, one is drawn per match")
     ap.add_argument("--opp-styles", type=csv, default=None, help="comma list, one is drawn per match")
     ap.add_argument("--sigmas", type=csv, default=["0"], help="playmaker, comma list of 0 (none) or 1..5")
+    ap.add_argument("--cases", type=csv, default=None,
+                    help="opponent formation and playmaker drawn together, e.g. 2-2-1:0,2-2-1:4 (replaces the two lists)")
     ap.add_argument("--radius", type=float, default=None, help="our vision radius")
     ap.add_argument("--zeta", type=int, default=None, help="structure level 0, 1 or 2")
-    ap.add_argument("--switching", default=None, help="NONE | SCHEDULED | RANDOM | SCORE_REACTIVE")
+    ap.add_argument("--switching", default=None, help="NONE | SCHEDULED | RANDOM | SCORE_REACTIVE | WINDOW")
     ap.add_argument("--T", type=int, default=None, help="match length in steps")
+    ap.add_argument("--recipe", default=None,
+                    help="a YAML file of config values for this run, e.g. configs/study.yaml (--set wins over it)")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                     help="any other config value, e.g. --set reward.w_progress=0.005 (can be repeated)")
     # how long, how parallel
@@ -372,9 +436,12 @@ def parse_args(argv=None):
     ap.add_argument("--hidden", type=int, default=256)
     ap.add_argument("--lr-actor", type=float, default=3e-4)
     ap.add_argument("--lr-critic", type=float, default=1e-3)
-    ap.add_argument("--gamma", type=float, default=1.0,
-                    help="discount: 1 = every choice is judged by the whole match (configs: reward)")
+    ap.add_argument("--gamma", type=float, default=0.99,
+                    help="discount: 0.99 looks about 100 steps ahead. At 1.0 a critic learns nothing that carries over "
+                         "to new matches (measured 2026-10-18)")
     ap.add_argument("--lam", type=float, default=0.95)
+    ap.add_argument("--value-norm", action=argparse.BooleanOptionalAction, default=True,
+                    help="normalise the critic's targets by their running mean and spread (MAPPO)")
     ap.add_argument("--clip", type=float, default=0.2)
     ap.add_argument("--epochs", type=int, default=5)
     ap.add_argument("--batch-size", type=int, default=512)
@@ -382,7 +449,9 @@ def parse_args(argv=None):
     ap.add_argument("--value-coef", type=float, default=0.5)
     ap.add_argument("--max-grad-norm", type=float, default=0.5)
     ap.add_argument("--shaping-anneal-end", type=int, default=5_000_000,
-                    help="steps over which shaping falls to 0 (with the easy start: counted from full strength)")
+                    help="steps over which shaping falls to --shaping-floor (with the easy start: counted from full strength)")
+    ap.add_argument("--shaping-floor", type=float, default=0.0,
+                    help="the shaping weight never falls below this (0 = the small terms fade out completely)")
     ap.add_argument("--opp-eps-start", type=float, default=None,
                     help="easy start: opponent randomness to begin with, see EPS_STEP (default: the opponent as configured)")
     ap.add_argument("--matches", type=int, default=None,
@@ -393,7 +462,8 @@ def parse_args(argv=None):
     ap.add_argument("--eval-interval", type=int, default=250_000)
     ap.add_argument("--eval-matches", type=int, default=20)
     ap.add_argument("--eval-procs", type=int, default=1, help="processes that play the evaluation matches side by side")
-    ap.add_argument("--final-eval-matches", type=int, default=100)
+    ap.add_argument("--test-matches", type=int, default=300,
+                    help="matches the best checkpoint plays at the end, on seeds no evaluation used (the run's result)")
     ap.add_argument("--ckpt-interval", type=int, default=50_000)
     args = ap.parse_args(argv)
     if args.rollout_len % args.seq_len:
@@ -401,17 +471,41 @@ def parse_args(argv=None):
     return args
 
 
+def _known(config: dict, key: str, where: str):
+    """A misspelt key must not run the wrong experiment silently."""
+    node = config
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            raise SystemExit(f"{where} {key}: there is no such value in the config")
+        node = node[part]
+
+
 def set_overrides(pairs) -> dict:
     """The --set KEY=VALUE pairs as config overrides."""
     known, out = load_config().to_dict(), {}
     for kv in pairs:
         key, value = kv.split("=", 1)
-        node = known
-        for part in key.split("."):                # a misspelt key must not run the wrong experiment silently
-            if not isinstance(node, dict) or part not in node:
-                raise SystemExit(f"--set {key}: there is no such value in the config")
-            node = node[part]
+        _known(known, key, "--set")
         out[key] = yaml.safe_load(value)
+    return out
+
+
+def recipe_overrides(path) -> dict:
+    """A recipe file (a partial copy of configs/default.yaml, e.g. configs/study.yaml) as config overrides, one for
+    every value it sets."""
+    if not path:
+        return {}
+    known, out = load_config().to_dict(), {}
+
+    def walk(d, prefix):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                walk(v, f"{prefix}{k}.")
+            else:
+                _known(known, f"{prefix}{k}", f"--recipe {path}:")
+                out[f"{prefix}{k}"] = v
+    with open(path) as f:
+        walk(yaml.safe_load(f) or {}, "")
     return out
 
 
@@ -426,21 +520,24 @@ def train(args):
     torch.manual_seed(args.seed)
     rng = np.random.default_rng(args.seed)
 
-    overrides = {}
+    overrides = recipe_overrides(args.recipe)
     if args.T:
         overrides["time.T"] = args.T
     if args.switching:
         overrides["opponent.switching.mode"] = args.switching
     overrides.update(set_overrides(args.set))
+    overrides["reward.potential.gamma"] = args.gamma       # the potential-based shaping uses the trainer's own discount
     cfg = load_config(overrides=overrides)
     if args.matches:                           # by whole matches: one update = one full match of every game
         T = int(cfg.time.T)
         if args.actor == "gru" and T % args.seq_len:
             raise SystemExit(f"--matches with --actor gru needs a match length that is a multiple of --seq-len")
         args.rollout_len, args.total_steps, args.eval_interval = T, args.matches * T, args.eval_every * T
-    scen = dict(our_formation=args.our_formation or cfg.formations.ours, radius=args.radius, zeta=args.zeta,
+    scen = dict(our_formation=args.our_formation or cfg.formations.ours, our_formations=args.our_formations,
+                radius=args.radius, zeta=args.zeta,
                 opp_formations=args.opp_formations or [cfg.formations.opponent],
-                opp_styles=args.opp_styles or [cfg.styles.opponent], sigmas=args.sigmas)
+                opp_styles=args.opp_styles or [cfg.styles.opponent], sigmas=args.sigmas,
+                cases=[(c.split(":")[0], int(c.split(":")[1])) for c in args.cases] if args.cases else None)
     name = args.name or (f"{args.actor}_f{scen['our_formation']}_r{args.radius or cfg.vision.radius:g}"
                          f"_z{cfg.structure.zeta if args.zeta is None else args.zeta}_s{args.seed}")
     run = Path(args.runs_dir) / name
@@ -458,6 +555,7 @@ def train(args):
     critic = Critic(state_dim + (5 if args.per_player else 0), args.hidden)
     opt_a = torch.optim.Adam(actor.parameters(), lr=args.lr_actor)
     opt_c = torch.optim.Adam(critic.parameters(), lr=args.lr_critic)
+    vnorm = ValueNorm()                         # never updated with --no-value-norm: then it scales nothing
 
     step = 0
     eps, recent = args.opp_eps_start, []       # opponent randomness now (None = as configured), our latest win scores
@@ -474,6 +572,8 @@ def train(args):
         if eps is not None:
             eps = ck.get("opp_eps", eps)
         anneal_from = ck.get("anneal_from", anneal_from)
+        if "vnorm" in ck:
+            vnorm.load(ck["vnorm"])
         rng = np.random.default_rng([args.seed, step])         # new games after a restart, not the same ones again
         print(f"[{name}] resuming from step {step}")
     with open(run / "config.json", "w") as f:
@@ -487,12 +587,12 @@ def train(args):
     def checkpoint():
         save_ckpt(ckpt, actor=actor.state_dict(), critic=critic.state_dict(), opt_a=opt_a.state_dict(),
                   opt_c=opt_c.state_dict(), step=step, args=vars(args), obs_dim=obs_dim, n_actions=n_act, opp_eps=eps,
-                  anneal_from=anneal_from, overrides=overrides)
+                  anneal_from=anneal_from, overrides=overrides, vnorm=vnorm.state())
 
     E, R = args.n_envs, args.rollout_len
 
     def shaping_w():
-        return 1.0 if anneal_from is None else max(0.0, 1.0 - (step - anneal_from) / args.shaping_anneal_end)
+        return 1.0 if anneal_from is None else max(args.shaping_floor, 1.0 - (step - anneal_from) / args.shaping_anneal_end)
 
     vec = VecEnv(E, args.workers, overrides, scen, int(rng.integers(2 ** 31)),
                  ((obs_dim, n_act, state_dim), args.hidden, actor.recurrent, args.per_player))
@@ -521,19 +621,27 @@ def train(args):
     while step < args.total_steps:
         t0, w = time.time(), shaping_w()
         buf, val, episodes = vec.rollout(actor, critic, R, (w, eps))
+        val = vnorm.denormalize(val)                           # the critic's outputs are normalised values
         buf["adv"], buf["ret"] = gae(buf["rew"], val, buf["done"], args.gamma, args.lam)
+        _, disc = gae(buf["rew"], val, buf["done"], args.gamma, 1.0)      # the discounted return itself
+        # how much the critic explains: of its own targets, and of the return that really followed (exact for whole
+        # matches). The second is the honest one: near 0 means the critic carries no credit to earlier choices
+        fit = dict(ev_targets=explained_variance(buf["ret"], val[:-1]), ev_return=explained_variance(disc, val[:-1]))
+        if args.value_norm:
+            vnorm.update(buf["ret"])
         t_roll = time.time() - t0
-        losses = ppo_update(actor, critic, opt_a, opt_c, buf, args, rng)
+        losses = ppo_update(actor, critic, opt_a, opt_c, buf, args, rng, vnorm)
         step += R * E
 
         dt = time.time() - t0
-        row = dict(losses, shaping_weight=w, opp_eps=eps_end if eps is None else eps, sps=R * E / dt,
+        row = dict(losses, **fit, shaping_weight=w, opp_eps=eps_end if eps is None else eps, sps=R * E / dt,
                    rollout_frac=t_roll / dt, reward_per_step=float(buf["rew"].mean()), matches=len(episodes))
         if episodes:
             row.update({k: float(np.mean([e[k] for e in episodes])) for k in episodes[0]})
         write("train", **row)
         progress()
         print(f"[{name}] " + (f"match {step // R:>6,}  " if args.matches else "") + f"step {step:>9,}  {row['sps']:6.0f} steps/s  ent {row['entropy']:.2f}  v_loss {row['v_loss']:.4f}"
+              + f"  ev {row['ev_return']:+.2f}  kl {row['approx_kl']:.4f}"
               + (f"  win {row['win']:.2f}  goal_diff {row['goal_diff']:+.2f}  shaping {row['shaping_return']:+.2f}"
                  if episodes else "") + ("" if eps is None else f"  opp_eps {eps:.2f}"), flush=True)
         if eps is not None:                    # the easy start: see EPS_STEP at the top of this file
@@ -550,19 +658,32 @@ def train(args):
         if step >= next_ckpt or step >= args.total_steps:
             checkpoint()
             next_ckpt = (step // args.ckpt_interval + 1) * args.ckpt_interval
-        if step >= next_eval and step < args.total_steps:
+        if step >= next_eval or step >= args.total_steps:      # the last weights are a candidate too
             ev = evaluate(actor, overrides, scen, args.eval_matches, args.eval_procs)
-            write("eval", **ev)
-            last_eval = (step // (R if args.matches else cfg.time.T), ev)
+            m = step // (R if args.matches else cfg.time.T)
+            cand = run / "ckpts" / f"m{m:06d}.pt"                  # every evaluation keeps its checkpoint
+            cand.parent.mkdir(exist_ok=True)
+            save_ckpt(cand, actor=actor.state_dict(), step=step, args=vars(args), obs_dim=obs_dim, n_actions=n_act,
+                      overrides=overrides)
+            write("eval", ckpt=cand.name, **ev)
+            last_eval = (m, ev)
             print(f"[{name}] EVAL at {step:,}: W {ev['W']:.2f}  win {ev['win']:.2f}  goal_diff {ev['goal_diff']:+.2f}", flush=True)
             next_eval = (step // args.eval_interval + 1) * args.eval_interval
 
     vec.close()
-    ev = evaluate(actor, overrides, scen, args.final_eval_matches, args.eval_procs)
-    write("final", **ev)
+    # the run's result: the evaluated checkpoint with the best W (then goal difference), played on the test seeds,
+    # which no evaluation used, so that picking the best does not flatter it
+    rows = [json.loads(line) for line in open(run / "log.jsonl")]
+    cands = [r for r in rows if r["kind"] == "eval" and "ckpt" in r and (run / "ckpts" / r["ckpt"]).exists()]
+    best = max(cands, key=lambda r: (r["W"], r["goal_diff"], r["step"]))
+    actor.load_state_dict(torch.load(run / "ckpts" / best["ckpt"], map_location="cpu", weights_only=False)["actor"])
+    ev = evaluate(actor, overrides, scen, args.test_matches, args.eval_procs, seed0=TEST_SEED0)
+    write("test", ckpt=best["ckpt"], validation_W=best["W"], **ev)
     with open(done, "w") as f:
-        json.dump({"name": name, "step": step, "args": vars(args), "scenario": scen, **ev}, f, indent=2)
-    print(f"[{name}] FINAL over {ev['matches']} matches: W {ev['W']:.2f}  win {ev['win']:.2f}  goal_diff {ev['goal_diff']:+.2f}")
+        json.dump({"name": name, "step": step, "args": vars(args), "scenario": scen, "best_ckpt": best["ckpt"],
+                   "validation": {k: best[k] for k in ("W", "goal_diff", "goals_for", "matches")}, **ev}, f, indent=2)
+    print(f"[{name}] TEST of {best['ckpt']} (best evaluation, W {best['W']:.2f}) over {ev['matches']} new matches: "
+          f"W {ev['W']:.2f}  win {ev['win']:.2f}  goal_diff {ev['goal_diff']:+.2f}")
 
 
 if __name__ == "__main__":

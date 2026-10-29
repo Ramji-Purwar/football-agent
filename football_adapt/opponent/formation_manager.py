@@ -1,6 +1,7 @@
 """FormationManager: decides the current formation g_t of the scripted team (opponent.md, Section 9).
 
-Modes: NONE | SCHEDULED | RANDOM | SCORE_REACTIVE. A minimum dwell time DWELL_MIN is respected between switches.
+Modes: NONE | SCHEDULED | RANDOM | SCORE_REACTIVE | WINDOW (one switch to window.target at a step drawn uniformly
+from [window.t_min, window.t_max] for each match: the Q2 test's switch process). A minimum dwell time DWELL_MIN is respected between switches.
 The manager does not move players. It only says which formation is active. Players then WALK to the new
 anchors (no teleporting), see ScriptedTeam."""
 from __future__ import annotations
@@ -10,13 +11,15 @@ class FormationManager:
     def __init__(self, cfg, rng, formation: str, formation_names: list, mode_override: str | None = None):
         sw = cfg.opponent.switching
         self.mode = (mode_override or sw.mode).upper()
-        assert self.mode in ("NONE", "SCHEDULED", "RANDOM", "SCORE_REACTIVE"), self.mode
+        assert self.mode in ("NONE", "SCHEDULED", "RANDOM", "SCORE_REACTIVE", "WINDOW"), self.mode
         self.sw = sw
         self.rng = rng
         self.names = list(formation_names)
         self.formation = formation
         self.dwell = 10 ** 9          # start "settled", so the first switch is not blocked
         self.dwell_min = sw.dwell_min
+        if self.mode == "WINDOW":
+            self.t_switch = int(rng.integers(sw.window.t_min, sw.window.t_max + 1))
 
     def reset(self, formation: str):
         self.formation = formation
@@ -29,6 +32,9 @@ class FormationManager:
         if self.mode == "SCHEDULED":
             if t == self.sw.scheduled.t_switch:
                 target = self.sw.scheduled.target
+        elif self.mode == "WINDOW":
+            if t == self.t_switch:
+                target = self.sw.window.target
         elif self.mode == "RANDOM":
             if self.dwell >= self.dwell_min and self.rng.random() < self.sw.random.h_switch:
                 choices = [n for n in self.names if n != self.formation]

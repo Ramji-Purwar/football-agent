@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from .actions import Kind
 from .geometry import dist, to_frame, closest_point_on_segment
-from .mechanics import control_rating, pass_interception
+from .mechanics import control_rating, pass_interception, shot_probability, sure_goal
 
 OWN, OTHER, LOOSE = 0, 1, 2   # possession from the observer's point of view
 
@@ -35,6 +35,7 @@ class Obs:
     slot_type: str                 # "D", "M" or "F"
     radius: float
     mask: np.ndarray = field(default=None)       # (n_actions,) bool
+    shot_chance: float = 0.0                     # carrier only: chance to score if he shot now, from the defenders he sees
     incoming: np.ndarray | None = None           # where a pass in flight will land, if this player is the one
                                                  # who gets it (receiver or interceptor). Not in the flat vector.
     prev_action: int = -1
@@ -103,16 +104,16 @@ def compute_mask(env, team: int, idx: int, obs_partial: dict) -> np.ndarray:
         elif k == Kind.TACKLE:
             ok = obs_partial["opp_carrier_close"]
         elif k == Kind.SHADOW:
-            ok = bool(obs_partial["opp_visible"][a.arg])
+            ok = env.cfg.actions.shadow and bool(obs_partial["opp_visible"][a.arg])
         else:
             ok = False
         # a learning player is offered only the choices that belong to his situation: no HOLD_SHAPE, GO_TO_BALL or
-        # SHADOW on the ball, no steps in a bare direction off it
+        # SHADOW on the ball, no steps in a bare direction off it (unless actions.walk_off_ball)
         if ok and env.cfg.actions.context_mask and env.controllers.get(team) is None:
             if has_ball:
                 ok = k not in (Kind.HOLD_SHAPE, Kind.GO_TO_BALL, Kind.SHADOW)
             else:
-                ok = k != Kind.MOVE_DIR
+                ok = k != Kind.MOVE_DIR or env.cfg.actions.walk_off_ball
         m[i] = ok
     return m
 
@@ -168,6 +169,10 @@ def build_observation(env, team: int, idx: int) -> Obs:
             t_frac=env.t / env.T, formation=env.formation[team],
             slot_type=env.book[env.formation[team]].slot_types[idx], radius=rho,
             prev_action=int(env.prev_action[team][idx]))
+    if env.cfg.actions.show_shot_chance and has_ball and in_zone:
+        m = env.cfg.mechanics
+        o.shot_chance = float(shot_probability(me, goal_c, [opp_pos[j] for j in range(5) if opp_vis[j]], ctrl,
+                                               m.p_max, m.d0, m.shot_block_scale, sure_goal(m)))
     o.mask = compute_mask(env, team, idx, partial)
     o.incoming = incoming
     return o
@@ -207,6 +212,10 @@ def flatten(env, o: Obs) -> np.ndarray:
         v += [0.0, 0.0, 0.0]
     p = np.zeros(3); p[o.possession] = 1.0; v += list(p)
     v += [float(np.clip(o.score_diff, -3, 3)) / 3.0, o.t_frac]
+    if env.cfg.actions.show_shot_chance:
+        v.append(o.shot_chance)
+    if env.cfg.actions.show_playmaker:                   # the Q3 oracle is told who the playmaker is (0 = none)
+        sg = np.zeros(6); sg[env.sigma] = 1.0; v += list(sg)
     return np.asarray(v, np.float32)
 
 

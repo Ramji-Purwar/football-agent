@@ -378,11 +378,12 @@ class ScriptedTeam:
         th = self.mv.through
         if not th.enabled or tp[0] < o.pos[0] - self.cr.back_tol:
             return None
+        v_pa = self._v_pass(o)
         d = unit(self.goal - tp) if tp[0] > 0.6 * self.L else np.array([1.0, 0.0])
         lead = th.lead
         for _ in range(2):                                           # he must get there first: lead <= his run in flight
             pt = np.clip(tp + lead * d, [2.0, 2.0], [self.L - 3.0, self.W - 2.0])
-            lead = min(lead, 0.8 * self.v_pl * np.ceil(dist(o.pos, pt) / self.v_pa))
+            lead = min(lead, 0.8 * self.v_pl * np.ceil(dist(o.pos, pt) / v_pa))
         pt = np.clip(tp + lead * d, [2.0, 2.0], [self.L - 3.0, self.W - 2.0])
         if dist(pt, tp) < 3.0:
             return None
@@ -391,11 +392,15 @@ class ScriptedTeam:
             return None
         if defs and min(min(dist(x, pt), dist(x, tp)) for x in defs) < th.space:
             return None
-        if not self._lane_safe(o.pos, pt, defs) or not self._path_uncuttable(o.pos, pt, defs):
+        if not self._lane_safe(o.pos, pt, defs, v_pa) or not self._path_uncuttable(o.pos, pt, defs, v_pa):
             return None
         return pt
 
-    def _path_uncuttable(self, a, b, defs):
+    def _v_pass(self, o):
+        """How fast this player's passes fly: the playmaker's faster by playmaker.pass_speed."""
+        return self.v_pa * (self.cfg.opponent.playmaker.pass_speed if o.idx == self.playmaker else 1.0)
+
+    def _path_uncuttable(self, a, b, defs, v_pa):
         """Walk along the ball's path a -> b: at every point, could a visible defender have run there (to within the
         cut-out radius) by the time the ball arrives? If any can, the through ball would be cut out."""
         fc = self.m.flight_cut
@@ -404,17 +409,17 @@ class ScriptedTeam:
             return True
         for s in np.arange(fc.free, n + 1e-9, 1.0):
             p = a + (b - a) * (s / n)
-            reach = fc.radius + self.v_pl * (s / self.v_pa) + self.mv.through.cut_margin
+            reach = fc.radius + self.v_pl * (s / v_pa) + self.mv.through.cut_margin
             if any(dist(d, p) <= reach for d in defs):
                 return False
         return True
 
-    def _lane_safe(self, a, b, defs):
+    def _lane_safe(self, a, b, defs, v_pa):
         """No visible defender can get to the pass a -> b: neither by the interception rule, nor by standing or
         stepping within `lane_margin` of the ball's path (the first metres next to the passer do not count)."""
         # the game lets a defender intercept if he is at most `margin` steps late. I only pass if he would be
         # `safe_slack` steps later still: a pass that is safe by a hair gets intercepted in practice.
-        if pass_interception(a, b, list(enumerate(defs)), self.v_pa, self.v_pl,
+        if pass_interception(a, b, list(enumerate(defs)), v_pa, self.v_pl,
                              self.margin + self.at.safe_slack) is not None:
             return False
         fc = self.m.flight_cut
@@ -448,7 +453,7 @@ class ScriptedTeam:
                     continue
                 if dist(pos, pt) > (self.ro.d_max_pass if o.slot_type == "D" else self.at.max_pass):
                     continue
-                if not through and not self._lane_safe(pos, pt, defs):
+                if not through and not self._lane_safe(pos, pt, defs, self._v_pass(o)):
                     continue
                 open_ = (min(dist(d, pt) for d in defs) if defs else self.at.open_max)
                 open_ = min(open_, self.at.open_max) / self.at.open_max
@@ -588,6 +593,9 @@ class ScriptedTeam:
             return spot(np.array([min(o.pos[0] + mv.pass_move.run, L - self.run.goal_gap), o.pos[1]]))
         if ctx["helper"] is not None and ctx["helper"][0] == j:      # the carrier is pressed and calls: show for it
             return MOVE_TO(self._free_spot(o, self._offer_target(o, home, ctx["helper"][1])))
+        if carrier is not None and j == self.playmaker and self.cfg.opponent.playmaker.free_role:
+            # the playmaker's free role: the free space next to the carrier, wherever that is (not tied to his zone)
+            return MOVE_TO(self._free_spot(o, self._offer_target(o, carrier, carrier)))
         if carrier is not None:
             c_side = np.sign(carrier[1] - W / 2)
             wide = abs(carrier[1] - W / 2) > mv.box.wide
