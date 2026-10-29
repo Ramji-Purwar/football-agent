@@ -1,0 +1,12 @@
+300 matches each, seeds 50000+
+runs/v4/ckpts/m029040.pt                                vs 2-2-1  n 300  W 0.71  goals  3.70-2.09  GD +1.61 (+-0.31)
+runs/v4/ckpts/m030000.pt                                vs 2-2-1  n 300  W 0.75  goals  3.72-1.86  GD +1.86 (+-0.31)
+runs/f122_r25_z0/ckpts/m005040.pt                       vs 1-2-2  n 300  W 0.84  goals  5.38-3.52  GD +1.86 (+-0.25)
+runs/q2pick/v2/m030000.pt                               vs 2-2-1  n 300  W 0.64  goals  3.44-2.54  GD +0.90 (+-0.33)
+runs/q2pick/v2/m033024.pt                               vs 2-2-1  n 300  W 0.64  goals  3.78-2.71  GD +1.07 (+-0.35)
+runs/q2pick/f122_r12_z1/m016032.pt                      vs 1-2-2  n 300  W 0.62  goals  3.27-2.69  GD +0.58 (+-0.37)
+runs/v4/ckpts/m030000.pt                                vs 1-2-2  n 300  W 0.04  goals  0.60-4.43  GD -3.83 (+-0.22)
+runs/f122_r25_z0/ckpts/m005040.pt                       vs 2-2-1  n 300  W 0.11  goals  0.86-3.68  GD -2.82 (+-0.26)
+runs/q2pick/v2/m030000.pt                               vs 1-2-2  n 300  W 0.03  goals  1.35-6.02  GD -4.67 (+-0.26)
+runs/q2pick/v2/m033024.pt                               vs 1-2-2  n 300  W 0.06  goals  1.59-6.08  GD -4.49 (+-0.31)
+runs/q2pick/f122_r12_z1/m016032.pt                      vs 2-2-1  n 300  W 0.05  goals  0.45-3.63  GD -3.18 (+-0.21)

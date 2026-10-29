@@ -1,0 +1,1 @@
+fall_r25_z0: 624 / 40,000 matches finished (1.6%), 207 matches a minute, elapsed 00:03:00, about 03:10:12 left (evaluations not counted)

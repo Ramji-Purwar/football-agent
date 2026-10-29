@@ -1,0 +1,5 @@
+runs/q2/guess/r25/maps.npz: 400 matches, 480,000 steps
+runs/q2/guess/r25/traces.npz: 200 matches
+runs/q2/guess/r12/maps.npz: 400 matches, 480,000 steps
+runs/q2/guess/r12/traces.npz: 200 matches
+DONE

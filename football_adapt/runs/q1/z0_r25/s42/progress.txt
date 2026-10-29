@@ -1,0 +1,2 @@
+v4_s42: 40,032 / 40,000 matches finished (100.1%), 82 matches a minute, elapsed 08:08:06, about 00:00:00 left (evaluations not counted)
+last evaluation (after 39,024 matches, 50 matches at full strength): W 0.78, goals 3.12 - 1.28

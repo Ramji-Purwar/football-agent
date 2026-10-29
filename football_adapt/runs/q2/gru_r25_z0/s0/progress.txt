@@ -1,0 +1,2 @@
+q2/gru_r25_z0/s0: 23,856 / 40,000 matches finished (59.6%), 84 matches a minute, elapsed 04:42:58, about 03:11:29 left (evaluations not counted)
+last evaluation (after 23,040 matches, 50 matches at full strength): W 0.57, goals 4.04 - 4.06

@@ -1,0 +1,7 @@
+300 matches each, seeds 50000+
+runs/v4/ckpts/m038016.pt                                vs 2-2-1  n 300  W 0.88  goals  7.14-1.69  GD +5.45 (+-0.51)  | their passes 50.5, shots  2.5, ball 54%
+runs/v4/ckpts/m038016.pt                                vs 2-2-1 playmaker 1  n 300  W 0.88  goals  6.96-1.64  GD +5.33 (+-0.50)  | their passes 51.0, shots  2.6, ball 53% | playmaker: gets  2.6 passes, gives  2.8, intercepts 0.2
+runs/v4/ckpts/m038016.pt                                vs 2-2-1 playmaker 2  n 300  W 0.81  goals  6.21-2.38  GD +3.83 (+-0.55)  | their passes 56.4, shots  3.8, ball 52% | playmaker: gets 12.9 passes, gives 13.1, intercepts 0.1
+runs/v4/ckpts/m038016.pt                                vs 2-2-1 playmaker 3  n 300  W 0.87  goals  6.80-1.59  GD +5.21 (+-0.49)  | their passes 54.8, shots  2.5, ball 53% | playmaker: gets 10.1 passes, gives  9.7, intercepts 0.0
+runs/v4/ckpts/m038016.pt                                vs 2-2-1 playmaker 4  n 300  W 0.66  goals  3.28-2.53  GD +0.75 (+-0.46)  | their passes 75.8, shots  3.7, ball 54% | playmaker: gets 27.6 passes, gives 28.0, intercepts 1.5
+runs/v4/ckpts/m038016.pt                                vs 2-2-1 playmaker 5  n 300  W 0.89  goals  6.97-1.56  GD +5.41 (+-0.47)  | their passes 50.0, shots  2.4, ball 54% | playmaker: gets  7.2 passes, gives 13.0, intercepts 0.0

@@ -1,0 +1,18 @@
+general runs/v4/ckpts/m030000.pt
+specialist runs/f122_r25_z0/ckpts/m005040.pt
+filter {'beta': 0.1, 'h': 0.0001, 'm': 1, 'anonymous': True}, starts 2-2-1, seeds 60000+
+all -> 1-2-2: 300 matches
+  none    W 0.46  goals 2.60-2.97  GD -0.37  after the switch 0.59-2.20 (-1.61)
+  oracle  W 0.75  goals 4.06-2.63  GD +1.42  after the switch 2.05-1.86 (+0.18)
+  guess   W 0.68  goals 3.66-2.65  GD +1.01  after the switch 1.76-1.80 (-0.05)
+  regret of none  vs oracle: W +0.29 (+-0.05), GD +1.79 (+-0.25)
+  regret of guess vs oracle: W +0.07 (+-0.05), GD +0.42 (+-0.24)
+  guesser: found the switch in 97%, delay median 68.0 steps (mean 93); false alarm in 23% of matches, 11.3 steps a match on the wrong team before the switch, 128 after
+
+2-2-1 -> 1-2-2: 300 matches
+  none    W 0.46  goals 2.60-2.97  GD -0.37  after the switch 0.59-2.20 (-1.61)
+  oracle  W 0.75  goals 4.06-2.63  GD +1.42  after the switch 2.05-1.86 (+0.18)
+  guess   W 0.68  goals 3.66-2.65  GD +1.01  after the switch 1.76-1.80 (-0.05)
+  regret of none  vs oracle: W +0.29 (+-0.05), GD +1.79 (+-0.25)
+  regret of guess vs oracle: W +0.07 (+-0.05), GD +0.42 (+-0.24)
+  guesser: found the switch in 97%, delay median 68.0 steps (mean 93); false alarm in 23% of matches, 11.3 steps a match on the wrong team before the switch, 128 after

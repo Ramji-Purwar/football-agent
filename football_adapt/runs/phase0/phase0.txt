@@ -1,0 +1,24 @@
+Phase 0 on the final game, 300 matches per line, seeds 80000+ (W of OUR side, +- 95%)
+
+(i)   random team vs scripted 2-2-1: W 0.00 +-0.00, goal difference -6.52
+      scripted vs scripted (2-2-1 both): W 0.48 +-0.05 (balance)
+(ii)  scripted with radius 12 vs scripted with 25: W 0.14 +-0.03, GD -1.69
+(ii)  scripted with radius 120 vs scripted with 25: W 0.56 +-0.05, GD +0.23
+      readability: opponents stand 9.0 m from their home spot on average; the home spots of two formations are 16.8 m apart (min 11.7)
+(iii) scripted team without a playmaker vs the same formation with one (W of the side WITHOUT him):
+      2-2-1: none 0.48, player 3 0.30, player 4 0.29
+      2-1-2: none 0.55, player 3 0.34
+      1-3-1: none 0.48, player 2 0.36, player 3 0.32, player 4 0.31
+      3-1-1: none 0.50, player 4 0.26
+
+(iv)  formation win matrix M(f, g): W of our scripted team in formation f (row) against g (column)
+         2-2-1  2-1-2  1-3-1  1-2-2  3-1-1   worst   mean
+  2-2-1   0.48   0.53   0.30   0.30   0.48    0.30   0.42
+  2-1-2   0.47   0.55   0.25   0.25   0.55    0.25   0.41
+  1-3-1   0.74   0.75   0.48   0.47   0.90    0.47   0.67
+  1-2-2   0.68   0.73   0.51   0.54   0.87    0.51   0.67
+  3-1-1   0.56   0.52   0.09   0.10   0.50    0.09   0.35
+      best response to each g: 2-2-1 -> 1-3-1, 2-1-2 -> 1-3-1, 1-3-1 -> 1-2-2, 1-2-2 -> 1-2-2, 3-1-1 -> 1-3-1
+      maximin formation: 1-2-2 (worst case 0.51); best on average: 1-3-1 (0.67)
+      against Q1's four training formations: best on average 1-3-1 (0.72), maximin 1-2-2 (0.51)
+      +- for one cell about 0.06

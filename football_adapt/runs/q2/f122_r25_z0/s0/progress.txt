@@ -1,0 +1,2 @@
+f122_r25_z0: 40,032 / 40,000 matches finished (100.1%), 82 matches a minute, elapsed 08:05:45, about 00:00:00 left (evaluations not counted)
+last evaluation (after 39,024 matches, 50 matches at full strength): W 1.00, goals 8.66 - 3.62

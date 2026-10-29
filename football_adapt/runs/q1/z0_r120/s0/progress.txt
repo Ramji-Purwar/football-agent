@@ -1,0 +1,2 @@
+v6: 40,032 / 40,000 matches finished (100.1%), 177 matches a minute, elapsed 03:45:34, about 00:00:00 left (evaluations not counted)
+last evaluation (after 39,024 matches, 50 matches at full strength): W 0.34, goals 1.62 - 2.56

@@ -1,0 +1,2 @@
+q3/pm4_r25_z0/s0: 40,032 / 40,000 matches finished (100.1%), 187 matches a minute, elapsed 03:34:14, about 00:00:00 left (evaluations not counted)
+last evaluation (after 39,024 matches, 50 matches at full strength): W 0.41, goals 2.06 - 2.30

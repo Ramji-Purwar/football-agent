@@ -1,0 +1,26 @@
+general runs/q2pick/v2/m030000.pt
+specialist runs/q2pick/f122_r12_z1/m016032.pt
+filter {'beta': 0.2, 'h': 0.0001, 'm': 1, 'anonymous': True}, starts 2-2-1,3-1-1, seeds 60000+
+all -> 1-2-2: 300 matches
+  none    W 0.25  goals 2.20-4.28  GD -2.07  after the switch 0.76-3.31 (-2.56)
+  oracle  W 0.53  goals 2.54-2.69  GD -0.15  after the switch 1.10-1.73 (-0.63)
+  guess   W 0.39  goals 2.30-3.25  GD -0.95  after the switch 1.09-2.18 (-1.09)
+  regret of none  vs oracle: W +0.28 (+-0.05), GD +1.93 (+-0.34)
+  regret of guess vs oracle: W +0.14 (+-0.07), GD +0.80 (+-0.41)
+  guesser: found the switch in 96%, delay median 66.0 steps (mean 93); false alarm in 59% of matches, 41.1 steps a match on the wrong team before the switch, 208 after
+
+2-2-1 -> 1-2-2: 157 matches
+  none    W 0.26  goals 2.48-4.40  GD -1.92  after the switch 0.78-3.24 (-2.46)
+  oracle  W 0.55  goals 2.75-2.90  GD -0.15  after the switch 1.05-1.75 (-0.69)
+  guess   W 0.39  goals 2.48-3.57  GD -1.10  after the switch 1.06-2.20 (-1.13)
+  regret of none  vs oracle: W +0.29 (+-0.08), GD +1.77 (+-0.48)
+  regret of guess vs oracle: W +0.17 (+-0.09), GD +0.94 (+-0.56)
+  guesser: found the switch in 96%, delay median 73.0 steps (mean 101); false alarm in 47% of matches, 51.9 steps a match on the wrong team before the switch, 215 after
+
+3-1-1 -> 1-2-2: 143 matches
+  none    W 0.24  goals 1.90-4.14  GD -2.24  after the switch 0.73-3.39 (-2.66)
+  oracle  W 0.51  goals 2.31-2.45  GD -0.14  after the switch 1.15-1.71 (-0.56)
+  guess   W 0.40  goals 2.10-2.89  GD -0.79  after the switch 1.11-2.15 (-1.04)
+  regret of none  vs oracle: W +0.27 (+-0.07), GD +2.10 (+-0.50)
+  regret of guess vs oracle: W +0.11 (+-0.10), GD +0.65 (+-0.61)
+  guesser: found the switch in 97%, delay median 58.5 steps (mean 85); false alarm in 72% of matches, 29.3 steps a match on the wrong team before the switch, 201 after

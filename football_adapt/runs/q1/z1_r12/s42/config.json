@@ -1,0 +1,654 @@
+{
+  "args": {
+    "name": "v2_s42",
+    "runs_dir": "runs",
+    "seed": 42,
+    "actor": "mlp",
+    "our_formation": "2-2-1",
+    "our_formations": null,
+    "opp_formations": [
+      "2-2-1",
+      "2-1-2",
+      "1-3-1",
+      "3-1-1"
+    ],
+    "opp_styles": null,
+    "sigmas": [
+      "0"
+    ],
+    "radius": 12.0,
+    "zeta": 1,
+    "switching": null,
+    "T": null,
+    "recipe": "configs/study.yaml",
+    "set": [],
+    "total_steps": 48000000,
+    "n_envs": 48,
+    "workers": true,
+    "torch_threads": 8,
+    "rollout_len": 1200,
+    "seq_len": 32,
+    "hidden": 256,
+    "lr_actor": 0.0003,
+    "lr_critic": 0.001,
+    "gamma": 0.99,
+    "lam": 0.95,
+    "value_norm": true,
+    "clip": 0.2,
+    "epochs": 5,
+    "batch_size": 1024,
+    "entropy_coef": 0.01,
+    "value_coef": 0.5,
+    "max_grad_norm": 0.5,
+    "shaping_anneal_end": 5000000,
+    "shaping_floor": 0.0,
+    "opp_eps_start": 0.5,
+    "matches": 40000,
+    "eval_every": 1000,
+    "eval_interval": 1200000,
+    "eval_matches": 50,
+    "eval_procs": 50,
+    "test_matches": 300,
+    "ckpt_interval": 50000,
+    "per_player": false
+  },
+  "scenario": {
+    "our_formation": "2-2-1",
+    "our_formations": null,
+    "radius": 12.0,
+    "zeta": 1,
+    "opp_formations": [
+      "2-2-1",
+      "2-1-2",
+      "1-3-1",
+      "3-1-1"
+    ],
+    "opp_styles": [
+      "normal"
+    ],
+    "sigmas": [
+      "0"
+    ]
+  },
+  "cfg": {
+    "pitch": {
+      "length": 100.0,
+      "width": 60.0,
+      "goal_width": 12.0
+    },
+    "time": {
+      "T": 1200,
+      "T_half": 600
+    },
+    "speeds": {
+      "player": 1.0,
+      "dribble": 0.75,
+      "pass": 3.0
+    },
+    "vision": {
+      "radius": 25.0,
+      "ball_always": true
+    },
+    "actions": {
+      "n_directions": 8,
+      "open_pass": {
+        "enabled": true,
+        "slack": 1.5,
+        "lane": 1.5,
+        "call": true
+      },
+      "through": {
+        "enabled": true,
+        "lead": 8.0,
+        "space": 8.0,
+        "cut_margin": 0.5,
+        "back_tol": 2.0
+      },
+      "shape_guide": false,
+      "context_mask": true,
+      "walk_off_ball": true,
+      "show_shot_chance": false
+    },
+    "mechanics": {
+      "tackle_dist": 2.0,
+      "tackle_recover": 3,
+      "max_steal_chain": 2,
+      "flight_cut": {
+        "radius": 1.5,
+        "free": 3.0
+      },
+      "goal_kick": {
+        "enabled": true,
+        "x": 6.0,
+        "protect": 10,
+        "clear_box": true,
+        "box": {
+          "depth": 16.5,
+          "half_width": 22.5
+        }
+      },
+      "clear": {
+        "dist": 40.0,
+        "spread": 0.2
+      },
+      "steal_lock": 15,
+      "pickup": 1.5,
+      "intercept_margin": 0.5,
+      "shadow_dist": 4.0,
+      "shoot_max": 35.0,
+      "p_max": 0.8,
+      "d0": 30.0,
+      "shot_block_scale": 4.0,
+      "shot_miss_spread": 6.0,
+      "sure_goal": {
+        "enabled": true,
+        "depth": 5.5,
+        "half_width": 11.5
+      },
+      "s_pass": 0.15
+    },
+    "control": {
+      "c_min": 0.5,
+      "l_ctrl": 20.0
+    },
+    "structure": {
+      "zeta": 2
+    },
+    "reward": {
+      "scale": 0.001,
+      "eta": 0.0,
+      "goal": 100.0,
+      "small_cap": 0.0,
+      "per_player": false,
+      "shaping_weight": 1.0,
+      "potential": {
+        "ball": 10.0,
+        "chance": 30.0,
+        "gamma": 0.99
+      },
+      "usefulness": {
+        "gain": 20.0,
+        "chance": 0.3
+      },
+      "w_pass_done": 0.0,
+      "pass_count_cap": 30,
+      "w_pass_accuracy": 0.0,
+      "accuracy_bar": 0.9,
+      "accuracy_min": 10,
+      "w_receive": 0.0,
+      "receive_gain": 5.0,
+      "w_free": 0.0,
+      "free_cap": 10.0,
+      "w_turnover": 0.0,
+      "w_progress": 0.0,
+      "progress_carry": false,
+      "w_assist": 0.0,
+      "assist_steps": 30,
+      "w_hold": 0.0,
+      "hold_free": 20,
+      "progress_pass_cap": 20.0,
+      "w_chance": 0.0,
+      "w_shot": 0.0,
+      "w_big_chance": 0.0,
+      "big_chance": 0.3,
+      "w_poor_shot": 0.0,
+      "w_missed_shot": 0.0,
+      "shot_rule": {
+        "pressed": 6.0,
+        "ahead": 7.0,
+        "far": 14.0,
+        "min_chance": 0.3,
+        "min_chance_pressed": 0.15,
+        "min_chance_close": 0.15,
+        "missed_steps": 5
+      },
+      "w_chance_against": 0.0,
+      "w_shot_against": 0.0,
+      "w_tackle": 0.0,
+      "w_interception": 0.0,
+      "win_zone": 1.0,
+      "w_open_lanes": 0.0,
+      "w_formation": 0.0,
+      "formation_dist": 15.0
+    },
+    "formations": {
+      "ours": "2-2-1",
+      "opponent": "2-2-1",
+      "anchors": {
+        "2-2-1": [
+          [
+            0.25,
+            0.3
+          ],
+          [
+            0.25,
+            0.7
+          ],
+          [
+            0.5,
+            0.3
+          ],
+          [
+            0.5,
+            0.7
+          ],
+          [
+            0.75,
+            0.5
+          ]
+        ],
+        "2-1-2": [
+          [
+            0.25,
+            0.3
+          ],
+          [
+            0.25,
+            0.7
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.3
+          ],
+          [
+            0.75,
+            0.7
+          ]
+        ],
+        "1-3-1": [
+          [
+            0.25,
+            0.5
+          ],
+          [
+            0.5,
+            0.2
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.5,
+            0.8
+          ],
+          [
+            0.75,
+            0.5
+          ]
+        ],
+        "1-2-2": [
+          [
+            0.25,
+            0.5
+          ],
+          [
+            0.5,
+            0.3
+          ],
+          [
+            0.5,
+            0.7
+          ],
+          [
+            0.75,
+            0.3
+          ],
+          [
+            0.75,
+            0.7
+          ]
+        ],
+        "3-1-1": [
+          [
+            0.25,
+            0.2
+          ],
+          [
+            0.25,
+            0.5
+          ],
+          [
+            0.25,
+            0.8
+          ],
+          [
+            0.5,
+            0.5
+          ],
+          [
+            0.75,
+            0.5
+          ]
+        ]
+      },
+      "phases": {
+        "enabled": true,
+        "rate": 0.05,
+        "attack": {
+          "x": {
+            "D": 0.42,
+            "M": 0.76,
+            "F": 0.85
+          },
+          "y_scale": 1.15
+        },
+        "defend": {
+          "x": {
+            "D": 0.15,
+            "M": 0.3,
+            "F": 0.5
+          },
+          "y_scale": 0.8
+        }
+      }
+    },
+    "styles": {
+      "ours": "normal",
+      "opponent": "normal",
+      "presets": {
+        "normal": {},
+        "aggressive": {
+          "formations": {
+            "phases": {
+              "attack": {
+                "x": {
+                  "D": 0.5,
+                  "M": 0.8,
+                  "F": 0.88
+                },
+                "y_scale": 1.2
+              },
+              "defend": {
+                "x": {
+                  "D": 0.25,
+                  "M": 0.42,
+                  "F": 0.62
+                },
+                "y_scale": 0.9
+              }
+            }
+          },
+          "opponent": {
+            "zone": {
+              "r_zone": 15.0,
+              "engage": 18.0,
+              "double_dist": 12.0
+            },
+            "lanes": {
+              "enabled": true
+            },
+            "attack": {
+              "w_fwd": 2.4,
+              "pass_min": 0.25,
+              "safe_slack": 1.2,
+              "lane_margin": 1.2
+            },
+            "support": {
+              "adv": 8.0,
+              "def": 4.0
+            },
+            "run": {
+              "lead": 13.0,
+              "r_run": 22.0
+            },
+            "moves": {
+              "through": {
+                "space": 6.5
+              }
+            }
+          }
+        },
+        "defensive": {
+          "formations": {
+            "phases": {
+              "rate": 0.08,
+              "attack": {
+                "x": {
+                  "D": 0.25,
+                  "M": 0.5,
+                  "F": 0.78
+                },
+                "y_scale": 1.05
+              },
+              "defend": {
+                "x": {
+                  "D": 0.13,
+                  "M": 0.26,
+                  "F": 0.5
+                },
+                "y_scale": 0.7
+              }
+            }
+          },
+          "opponent": {
+            "roles": {
+              "d_max_pass": 60.0
+            },
+            "patience": {
+              "enabled": true
+            },
+            "moves": {
+              "counter": {
+                "steps": 25,
+                "lead_mult": 1.8,
+                "fwd_mult": 1.8
+              }
+            }
+          }
+        }
+      }
+    },
+    "opponent": {
+      "zone": {
+        "r_zone": 12.0,
+        "engage": 8.0,
+        "double_dist": 10.0,
+        "omega": 0.4,
+        "eps_arrive": 1.0,
+        "transition_max": 60
+      },
+      "switching": {
+        "mode": "NONE",
+        "dwell_min": 150,
+        "scheduled": {
+          "t_switch": 600,
+          "target": "1-2-2"
+        },
+        "random": {
+          "h_switch": 0.005
+        },
+        "score_reactive": {
+          "check_interval": 50,
+          "trail_thresh": 1,
+          "lead_thresh": 1,
+          "f_att": "1-2-2",
+          "f_def": "3-1-1"
+        }
+      },
+      "attack": {
+        "shoot_min": 0.3,
+        "w_fwd": 2.0,
+        "w_open": 0.5,
+        "w_dist": 0.3,
+        "pass_min": 0.3,
+        "d_danger": 6.0,
+        "hub_bonus": 0.3,
+        "open_max": 15.0,
+        "lane_margin": 1.5,
+        "safe_slack": 1.5,
+        "shoot_close": 14.0,
+        "shoot_free": 7.0,
+        "max_pass": 60.0,
+        "fwd_cap": 1.0,
+        "call": true
+      },
+      "support": {
+        "adv": 4.0,
+        "mid": 6.0,
+        "def": 1.0,
+        "r_support": 10.0,
+        "offer_dist": 10.0,
+        "offer_max": 30.0,
+        "offer_sep": 8.0,
+        "offer_space": 6.0
+      },
+      "block": {
+        "push": 0.0,
+        "drop": 0.0,
+        "rate": 0.5
+      },
+      "run": {
+        "enabled": true,
+        "lead": 10.0,
+        "r_run": 18.0,
+        "dy": 8.0,
+        "goal_gap": 4.0
+      },
+      "width": {
+        "attack": 0.0,
+        "defend": 0.0,
+        "rate": 0.01,
+        "slide": 3.0,
+        "slide_rate": 0.3
+      },
+      "cover": {
+        "enabled": true,
+        "dist": 5.0,
+        "max_dev": 4.0
+      },
+      "roles": {
+        "push_scale": {
+          "D": 0.6,
+          "M": 1.0,
+          "F": 1.0
+        },
+        "drop_scale": {
+          "D": 1.0,
+          "M": 1.0,
+          "F": 0.5
+        },
+        "d_dribble_max_x": 0.6,
+        "carry_bias": {
+          "D": 0.8,
+          "M": 0.8,
+          "F": 0.0
+        },
+        "d_max_pass": 45.0,
+        "d_shoot_extra": 0.2,
+        "pass_bias": {
+          "D": -0.1,
+          "M": 0.0,
+          "F": 0.1
+        }
+      },
+      "moves": {
+        "through": {
+          "enabled": true,
+          "lead": 8.0,
+          "space": 8.0,
+          "bonus": 0.1,
+          "cut_margin": 0.5
+        },
+        "pass_move": {
+          "steps": 10,
+          "run": 12.0,
+          "one_two_bonus": 0.4
+        },
+        "counter_press": {
+          "steps": 10,
+          "n": 2
+        },
+        "close_down": {
+          "enabled": true,
+          "lane": 6.0,
+          "lead": 15.0
+        },
+        "counter": {
+          "steps": 15,
+          "lead_mult": 1.6,
+          "fwd_mult": 1.5
+        },
+        "call_help": {
+          "enabled": true,
+          "trigger": 6.0
+        },
+        "assist": {
+          "enabled": true
+        },
+        "box": {
+          "x": 0.7,
+          "wide": 8.0,
+          "post_gap": 8.0,
+          "cutback_gap": 18.0
+        },
+        "overlap": {
+          "trigger": 12.0,
+          "ahead": 8.0,
+          "wide": 7.0,
+          "max_dev": 18.0
+        },
+        "drop_deep": {
+          "trigger": 35.0,
+          "dist": 12.0
+        }
+      },
+      "patience": {
+        "enabled": false,
+        "start": 60,
+        "full": 120,
+        "shoot": 0.1,
+        "pass_relief": 0.2
+      },
+      "lanes": {
+        "enabled": false,
+        "frac": 0.5,
+        "side": 8.0,
+        "max_dev": {
+          "D": 12.0,
+          "M": 22.0,
+          "F": 22.0
+        }
+      },
+      "clear": {
+        "enabled": true,
+        "max_x": 0.5,
+        "w_mate": 0.5
+      },
+      "space": {
+        "radius": 6.0,
+        "w_mates": 0.5,
+        "w_move": 0.2
+      },
+      "carrier": {
+        "press_dist": 3.0,
+        "press_relief": 0.2,
+        "better_margin": 0.1,
+        "back_tol": 2.0,
+        "free_dist": 8.0,
+        "carry_free": 10.0,
+        "carry_step": 4.0,
+        "release_dist": 6.0,
+        "release_shoot": 0.0,
+        "stall_steps": 30,
+        "stall_dist": 2.0
+      },
+      "hunt": {
+        "after": 80,
+        "n": 2,
+        "depth": 10.0,
+        "wide": 15.0
+      },
+      "randomness": {
+        "eps_opp": 0.0
+      },
+      "playmaker": {
+        "sigma": 0
+      }
+    }
+  }
+}

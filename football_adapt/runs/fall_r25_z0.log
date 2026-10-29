@@ -1,0 +1,13 @@
+[fall_r25_z0] match     48  step    57,600    4197 steps/s  ent 2.49  v_loss 0.1718  ev -2.33  kl 0.0053  win 0.00  goal_diff -0.60  shaping +0.02  opp_eps 0.50
+[fall_r25_z0] match     96  step   115,200    4173 steps/s  ent 2.50  v_loss 0.0745  ev -1.57  kl 0.0055  win 0.02  goal_diff -0.46  shaping +0.02  opp_eps 0.50
+[fall_r25_z0] match    144  step   172,800    4144 steps/s  ent 2.50  v_loss 0.0927  ev -0.65  kl 0.0055  win 0.21  goal_diff -0.15  shaping +0.01  opp_eps 0.50
+[fall_r25_z0] match    192  step   230,400    4140 steps/s  ent 2.50  v_loss 0.0688  ev -0.29  kl 0.0056  win 0.17  goal_diff -0.44  shaping +0.02  opp_eps 0.50
+[fall_r25_z0] match    240  step   288,000    4135 steps/s  ent 2.47  v_loss 0.0843  ev -0.40  kl 0.0054  win 0.31  goal_diff +0.02  shaping +0.01  opp_eps 0.50
+[fall_r25_z0] match    288  step   345,600    4107 steps/s  ent 2.46  v_loss 0.0681  ev -0.61  kl 0.0058  win 0.29  goal_diff -0.06  shaping -0.00  opp_eps 0.50
+[fall_r25_z0] match    336  step   403,200    4157 steps/s  ent 2.44  v_loss 0.0875  ev -0.50  kl 0.0060  win 0.48  goal_diff +0.31  shaping -0.00  opp_eps 0.50
+[fall_r25_z0] match    384  step   460,800    4140 steps/s  ent 2.44  v_loss 0.0746  ev -0.18  kl 0.0059  win 0.48  goal_diff +0.38  shaping +0.00  opp_eps 0.50
+[fall_r25_z0] match    432  step   518,400    4183 steps/s  ent 2.42  v_loss 0.0720  ev -0.20  kl 0.0061  win 0.60  goal_diff +0.69  shaping -0.01  opp_eps 0.50
+[fall_r25_z0] match    480  step   576,000    4149 steps/s  ent 2.41  v_loss 0.0648  ev -0.30  kl 0.0060  win 0.48  goal_diff +0.48  shaping -0.00  opp_eps 0.50
+[fall_r25_z0] match    528  step   633,600    4159 steps/s  ent 2.39  v_loss 0.0672  ev -0.22  kl 0.0061  win 0.58  goal_diff +0.65  shaping -0.00  opp_eps 0.45
+[fall_r25_z0] match    576  step   691,200    4140 steps/s  ent 2.37  v_loss 0.0781  ev -0.33  kl 0.0064  win 0.46  goal_diff +0.31  shaping -0.00  opp_eps 0.45
+[fall_r25_z0] match    624  step   748,800    4019 steps/s  ent 2.36  v_loss 0.0838  ev -0.30  kl 0.0059  win 0.52  goal_diff +0.56  shaping +0.00  opp_eps 0.40
