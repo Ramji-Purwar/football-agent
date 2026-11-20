@@ -33,8 +33,8 @@ Other findings:
 ### 2.1 The playmaker
 
 The plan's playmaker (one opponent with infinite vision, everything else the same) made no difference: against v4 only
-player 4 in 2-2-1 cost anything (W 0.88 → 0.66, 300 matches) and the defenders and the forward cost nothing. The user
-then asked that **every midfielder** must make an impact, in **several formations**, and finally that v4 must **lose in
+player 4 in 2-2-1 cost anything (W 0.88 → 0.66, 300 matches) and the defenders and the forward cost nothing. We
+then required that **every midfielder** must make an impact, in **several formations**, and finally that v4 must **lose in
 every case** (W < 0.5). The abilities were added one at a time and each was screened against v4:
 
 | playmaker | v4 W in the 7 midfielder cases | kept? |
@@ -95,13 +95,13 @@ filter only knows the opponent numbers, not their formation.
 
 | Plan | What was run | Why |
 |---|---|---|
-| playmaker = infinite vision only | + free role, hub bonus, control 4 | vision alone cost v4 nothing in most cases (user: every midfielder must matter, v4 must lose) |
-| playmaker positions 1–5, decision 16's roles 1/3/5 | **midfielders only** (players 2, 3, 4), 4 formations | the user's choice; defenders and the forward made no difference |
-| one specialist per playmaker number (5) | **2** (players 2 and 4) | only midfielders are playmakers; the player 3 specialist failed (user: keep players 2 and 4) |
+| playmaker = infinite vision only | + free role, hub bonus, control 4 | vision alone cost v4 nothing in most cases (every midfielder must matter, v4 must lose) |
+| playmaker positions 1–5 | **midfielders only** (players 2, 3, 4), 4 formations | defenders and the forward made no difference |
+| one specialist per playmaker number (5) | **2** (players 2 and 4) | only midfielders are playmakers; the player 3 specialist failed (test W 0.25), so players 2 and 4 were kept |
 | guess from long passes and interceptions from afar | from positions relative to the ball | his passes are no longer faster, and positions carry the evidence |
 | small and large `r` | **radius 25 only** | v4 is the unaware team; the "more at small r" part of the hypothesis is not tested |
-| team 4: no-shadow ablation | **not run** | the switch exists (`actions.shadow: false`), but the specialists do not use SHADOW on him (Section 3.5), so its value would be ~0; this was the first item to drop if time ran short |
-| team 5: one recurrent policy over all cases | **not run** | |
+| team 4: no-shadow ablation | **run** as `mixw_ns` (one recurrent team without SHADOW, warm-started) | from scratch the mixture teams did not learn; see the AUTO tables and the paper, Section 4.6 |
+| team 5: one recurrent policy over all cases | **run** as `mixw` (and `mixw_told`, told who the playmaker is), warm-started from the Q2 GRU seed 0 | same reason; the warm start is stated wherever these teams are compared |
 
 ## 3. Results
 
@@ -205,8 +205,8 @@ specialist then loses most of them. Over all no-playmaker matches the adaptive t
 Both teams use SHADOW about as much, and on the playmaker about as often (an opponent picked at random would be 20%).
 Even with every match against the same playmaker, the specialists did not learn to mark him. Whatever they do
 differently, it is not man-marking. Finding out how they win was not part of this work. So the "neutralize" in Q3 is
-measured (W won back), but **not by the mechanism the plan expected**. For the same reason the no-shadow ablation
-(team 4) was not run: it would remove an action the specialists do not aim at him.
+measured (W won back), but **not by the mechanism the plan expected**. The no-shadow ablation was run later
+on the recurrent mixture team (`mixw_ns`); it scored higher than the team with SHADOW (paper, Section 4.6).
 
 ### 3.6 The specialists' training
 

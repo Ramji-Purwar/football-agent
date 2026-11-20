@@ -75,9 +75,9 @@ clear that seeds disagree by more than settings do. The generated tables list ex
 |---|---|---|
 | ζ 0 against ζ 2 | ζ 0, **ζ 1 and ζ 2** | ζ 1 (information and the move, no penalty) separates the information from the enforcement |
 | 3 formations of ours | **2-2-1** at every structure level; **1-3-1 and 1-2-2 at ζ 1, one seed each; later 4 seeds each at 12 m and 2 for 1-3-1 at 25 m** | compute; 1-3-1 is the best formation on average in Phase 0, 1-2-2 the maximin |
-| 3 radii + full vision | **12, 25, full** | decision 12 |
+| 3 radii + full vision | **12, 25, full** | compute |
 | 3 seeds (5 on headline settings) | **4 seeds** (ζ 0, ζ 1), **3** (ζ 2), 1 (other formations) | |
-| opponent formation random over all 5 | **4 formations** (no 1-2-2) | decision 10 |
+| opponent formation random over all 5 | **4 formations** (no 1-2-2) | 1-2-2 is far stronger; held out as the Q2 target |
 
 ## 3. Results
 

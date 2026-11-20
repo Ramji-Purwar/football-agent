@@ -4,6 +4,6 @@ pyyaml>=6.0
 matplotlib>=3.8
 torch>=2.2        # the CPU build is enough; no GPU is used anywhere
 pytest>=7.0
-# only for watching matches (scripts/pygame_render.py, scripts/watch_match.py):
+# only for watching matches (scripts/pygame_render.py):
 pygame>=2.5
 pillow>=10.0

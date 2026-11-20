@@ -86,15 +86,17 @@ requirements.txt
 idea.pdf                     the project proposal
 paper/                       the final report: main.tex, references.bib, PRIMEarxiv.sty, media/ (figures),
                              make_figs.py (draws every figure, writes numbers.txt), CS329_Group26_Final_Report.pdf
-docs/                        per-question reports (reportQ1-3.md), results_final.md, FINAL_REPORT.md, and the
-                             design documents: game.md, opponent.md, agents.md, training.md, experiments.md, ...
+docs/                        the detailed per-question reports (reportQ1-3.md), results_final.md (every table,
+                             generated), questions.md (the original plan), and the specifications of the game,
+                             the opponent and the training that the code refers to (game.md, opponent.md, training.md)
 football_adapt/              all code (run everything from inside this folder, with PYTHONPATH=.)
   football/                  the game: config, geometry, formations, actions, mechanics, observation, env
   opponent/                  the scripted zonal opponent, formation switching, the playmaker
   agents/                    MAPPO actor/critic (MLP or GRU), the formation filter (Q2), the playmaker filter (Q3)
   training/train.py          one training run: rollouts, PPO update, evaluation, checkpoints, final test
   configs/                   default.yaml (every parameter) and study.yaml (the settings used in the study)
-  scripts/                   q2.py and q3.py (the Q2/Q3 experiments), replay_test.py, train_command.py, viewers
+  scripts/                   q2.py and q3.py (the Q2/Q3 experiments), phase0_checks.py, replay_test.py,
+                             train_command.py, pygame_render.py (viewer)
   tests/                     unit tests
   runs/                      the results of every run (see below)
     _tools/                  final_report.py (all tables) and the evaluation helpers used during the study
