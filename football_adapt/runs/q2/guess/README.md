@@ -36,4 +36,4 @@ wrong team after the switch, a match: 31 at radius 25, 59 at radius 12.
 - After a mid-match handover the specialist plays below its kick-off level: the oracle gets +0.18 after the switch at
   radius 25 (about half a match, where its kick-off level would give about +0.9) and -0.63 at radius 12 (about +0.3).
 - Files per radius: `maps.npz`, `traces.npz` (tuning matches), `tune.txt` and `filter_grid.json` (every setting tried),
-  `filter.json`, `test.jsonl` (one line per match and team), `test.txt`. `run_all.sh` ran all of it on clnode148.
+  `filter.json`, `test.jsonl` (one line per match and team), `test.txt`. `run_all.sh` ran all of it on one server.

@@ -1,0 +1,41 @@
+general runs/q1/z0_r25/s0/ckpts/m030000.pt
+specialist runs/q2/f122_r25_z0/s0/ckpts/m005040.pt
+teams {'gru': 'runs/q2/gru_r25_z0/s0/ckpts/m040032.pt', 'mlp': 'runs/q2/mlp_r25_z0/s0/ckpts/m039024.pt'}
+filter {'beta': 0.1, 'h': 0.0001, 'm': 1}, starts 2-2-1, switch mode window, seeds 60000+
+all -> 1-2-2: 300 matches
+  none      W 0.46  goals 2.60-2.97  GD -0.37  after the switch 0.59-2.20 (-1.61)
+  oracle    W 0.75  goals 4.06-2.63  GD +1.42  after the switch 2.05-1.86 (+0.18)
+  guess     W 0.74  goals 4.02-2.59  GD +1.43  after the switch 2.01-1.82 (+0.19)
+  gru       W 0.96  goals 5.77-3.01  GD +2.76  after the switch 3.24-1.68 (+1.56)
+  mlp       W 0.99  goals 10.64-0.73  GD +9.91  after the switch 5.01-0.56 (+4.45)
+  regret of none      vs oracle: W +0.29 (+-0.05), GD +1.79 (+-0.25)
+  regret of guess     vs oracle: W +0.01 (+-0.04), GD -0.01 (+-0.20)
+  regret of gru       vs oracle: W -0.21 (+-0.05), GD -1.33 (+-0.34)
+  regret of mlp       vs oracle: W -0.24 (+-0.05), GD -8.48 (+-0.41)
+  guesser: found 100% of 300 switches into 1-2-2, delay median 28.0 steps (mean 29); says 1-2-2 wrongly in 0% of matches, 0.0 steps a match; misses 31 steps a match while it is 1-2-2
+  probe of gru: found 100% of 300 switches into 1-2-2, delay median 9.0 steps (mean 9); says 1-2-2 wrongly in 89% of matches, 20.2 steps a match; misses 27 steps a match while it is 1-2-2
+  adaptation lag (goal-difference rate per 100 steps over 100-step windows, aligned at the switch; lag = first step it is back within 0.05 of the rate before):
+    none      before +0.16 | after, from step  0:-0.09  100:-0.28  200:-0.28  300:-0.28  500:-0.30 | lag not within the match
+    oracle    before +0.16 | after, from step  0:-0.31  100:+0.06  200:+0.07  300:+0.08  500:+0.03 | lag 220
+    guess     before +0.16 | after, from step  0:-0.25  100:+0.02  200:+0.04  300:+0.15  500:-0.01 | lag 230
+    gru       before +0.14 | after, from step  0:+0.35  100:+0.22  200:+0.25  300:+0.32  500:+0.26 | lag 0
+    mlp       before +1.03 | after, from step  0:+0.56  100:+0.65  200:+0.81  300:+0.80  500:+0.83 | lag not within the match
+
+2-2-1 -> 1-2-2: 300 matches
+  none      W 0.46  goals 2.60-2.97  GD -0.37  after the switch 0.59-2.20 (-1.61)
+  oracle    W 0.75  goals 4.06-2.63  GD +1.42  after the switch 2.05-1.86 (+0.18)
+  guess     W 0.74  goals 4.02-2.59  GD +1.43  after the switch 2.01-1.82 (+0.19)
+  gru       W 0.96  goals 5.77-3.01  GD +2.76  after the switch 3.24-1.68 (+1.56)
+  mlp       W 0.99  goals 10.64-0.73  GD +9.91  after the switch 5.01-0.56 (+4.45)
+  regret of none      vs oracle: W +0.29 (+-0.05), GD +1.79 (+-0.25)
+  regret of guess     vs oracle: W +0.01 (+-0.04), GD -0.01 (+-0.20)
+  regret of gru       vs oracle: W -0.21 (+-0.05), GD -1.33 (+-0.34)
+  regret of mlp       vs oracle: W -0.24 (+-0.05), GD -8.48 (+-0.41)
+  guesser: found 100% of 300 switches into 1-2-2, delay median 28.0 steps (mean 29); says 1-2-2 wrongly in 0% of matches, 0.0 steps a match; misses 31 steps a match while it is 1-2-2
+  probe of gru: found 100% of 300 switches into 1-2-2, delay median 9.0 steps (mean 9); says 1-2-2 wrongly in 89% of matches, 20.2 steps a match; misses 27 steps a match while it is 1-2-2
+  adaptation lag (goal-difference rate per 100 steps over 100-step windows, aligned at the switch; lag = first step it is back within 0.05 of the rate before):
+    none      before +0.16 | after, from step  0:-0.09  100:-0.28  200:-0.28  300:-0.28  500:-0.30 | lag not within the match
+    oracle    before +0.16 | after, from step  0:-0.31  100:+0.06  200:+0.07  300:+0.08  500:+0.03 | lag 220
+    guess     before +0.16 | after, from step  0:-0.25  100:+0.02  200:+0.04  300:+0.15  500:-0.01 | lag 230
+    gru       before +0.14 | after, from step  0:+0.35  100:+0.22  200:+0.25  300:+0.32  500:+0.26 | lag 0
+    mlp       before +1.03 | after, from step  0:+0.56  100:+0.65  200:+0.81  300:+0.80  500:+0.83 | lag not within the match

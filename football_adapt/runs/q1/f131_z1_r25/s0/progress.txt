@@ -1,0 +1,2 @@
+q1/f131_z1_r25/s0: 40,032 / 40,000 matches finished (100.1%), 42 matches a minute, elapsed 15:58:35, about 00:00:00 left (evaluations not counted)
+last evaluation (after 39,024 matches, 50 matches at full strength): W 1.00, goals 5.58 - 1.26

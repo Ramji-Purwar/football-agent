@@ -1,47 +1,114 @@
-# Python virtual environments
-.venv/
-venv/
-ENV/
-env/
-
-# Byte-compiled / optimized / DLL files
+# Python, editors, local tools
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Pytest / Caches
 .pytest_cache/
-.coverage
-htmlcov/
-
-# Visualizer & Output files
-*.gif
-*.mp4
-*.png
-# ... except the pictures used by the docs
-!docs/img/**/*.png
-
-# IDEs and Editors
+.venv/
+venv/
 .vscode/
 .idea/
 *.swp
-*.swo
+.claude/
 
-# Distribution / packaging
-build/
-devel/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-./venv
+# outputs of reproduce.sh
+reproduce_out/
 
+# LaTeX build files
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.zip
+paper/main.pdf
+
+# match videos
+*.gif
+*.mp4
+
+# not part of the repository: course template, working notes, cluster scripts
+templateArxiv.tex
+HANDOVER.md
+todo.md
+cluster/
+_backup/
+# queue logs of the development runs (the run folders hold each run's own logs)
+football_adapt/runs/*.log
+
+# training states and intermediate checkpoints are not kept; the checkpoints the results use are listed below
+football_adapt/runs/**/ckpt.pt
+football_adapt/runs/**/ckpts/*
+!football_adapt/runs/q2/gru_r25_z0/s0/ckpt.pt
+!football_adapt/runs/q3/mix_r25_z0/s0/ckpt.pt
+!football_adapt/runs/q3/mix_ns_r25_z0/s0/ckpt.pt
+!football_adapt/runs/q3/oracle_r25_z0/s0/ckpt.pt
+!football_adapt/runs/q1/f122_z1_r12/s0/ckpts/m039024.pt
+!football_adapt/runs/q1/f122_z1_r12/s11/ckpts/m039024.pt
+!football_adapt/runs/q1/f122_z1_r12/s42/ckpts/m031008.pt
+!football_adapt/runs/q1/f122_z1_r12/s7/ckpts/m037008.pt
+!football_adapt/runs/q1/f122_z1_r120/s0/ckpts/m040032.pt
+!football_adapt/runs/q1/f122_z1_r25/s0/ckpts/m040032.pt
+!football_adapt/runs/q1/f131_z1_r12/s0/ckpts/m038016.pt
+!football_adapt/runs/q1/f131_z1_r12/s11/ckpts/m040032.pt
+!football_adapt/runs/q1/f131_z1_r12/s42/ckpts/m040032.pt
+!football_adapt/runs/q1/f131_z1_r12/s7/ckpts/m040032.pt
+!football_adapt/runs/q1/f131_z1_r120/s0/ckpts/m027024.pt
+!football_adapt/runs/q1/f131_z1_r25/s0/ckpts/m039024.pt
+!football_adapt/runs/q1/f131_z1_r25/s7/ckpts/m040032.pt
+!football_adapt/runs/q1/z0_r12/s0/ckpts/m025008.pt
+!football_adapt/runs/q1/z0_r12/s11/ckpts/m040032.pt
+!football_adapt/runs/q1/z0_r12/s42/ckpts/m040032.pt
+!football_adapt/runs/q1/z0_r12/s7/ckpts/m027024.pt
+!football_adapt/runs/q1/z0_r120/s0/ckpts/m040032.pt
+!football_adapt/runs/q1/z0_r120/s11/ckpts/m039024.pt
+!football_adapt/runs/q1/z0_r120/s42/ckpts/m030000.pt
+!football_adapt/runs/q1/z0_r120/s7/ckpts/m039024.pt
+!football_adapt/runs/q1/z0_r25/s0/ckpts/m030000.pt
+!football_adapt/runs/q1/z0_r25/s0/ckpts/m038016.pt
+!football_adapt/runs/q1/z0_r25/s11/ckpts/m038016.pt
+!football_adapt/runs/q1/z0_r25/s42/ckpts/m034032.pt
+!football_adapt/runs/q1/z0_r25/s7/ckpts/m040032.pt
+!football_adapt/runs/q1/z1_r12/s0/ckpts/m030000.pt
+!football_adapt/runs/q1/z1_r12/s0/ckpts/m036000.pt
+!football_adapt/runs/q1/z1_r12/s11/ckpts/m038016.pt
+!football_adapt/runs/q1/z1_r12/s42/ckpts/m035040.pt
+!football_adapt/runs/q1/z1_r12/s7/ckpts/m036000.pt
+!football_adapt/runs/q1/z1_r120/s0/ckpts/m031008.pt
+!football_adapt/runs/q1/z1_r120/s11/ckpts/m031008.pt
+!football_adapt/runs/q1/z1_r120/s42/ckpts/m040032.pt
+!football_adapt/runs/q1/z1_r120/s7/ckpts/m039024.pt
+!football_adapt/runs/q1/z1_r25/s0/ckpts/m039024.pt
+!football_adapt/runs/q1/z1_r25/s11/ckpts/m032016.pt
+!football_adapt/runs/q1/z1_r25/s42/ckpts/m035040.pt
+!football_adapt/runs/q1/z1_r25/s7/ckpts/m040032.pt
+!football_adapt/runs/q1/z2_r12/s0/ckpts/m035040.pt
+!football_adapt/runs/q1/z2_r12/s11/ckpts/m035040.pt
+!football_adapt/runs/q1/z2_r12/s7/ckpts/m040032.pt
+!football_adapt/runs/q1/z2_r120/s0/ckpts/m039024.pt
+!football_adapt/runs/q1/z2_r120/s11/ckpts/m034032.pt
+!football_adapt/runs/q1/z2_r120/s7/ckpts/m032016.pt
+!football_adapt/runs/q1/z2_r25/s0/ckpts/m040032.pt
+!football_adapt/runs/q1/z2_r25/s11/ckpts/m035040.pt
+!football_adapt/runs/q1/z2_r25/s7/ckpts/m037008.pt
+!football_adapt/runs/q2/f122_r12_z1/s0/ckpts/m016032.pt
+!football_adapt/runs/q2/f122_r12_z1/s0/ckpts/m032016.pt
+!football_adapt/runs/q2/f122_r25_z0/s0/ckpts/m005040.pt
+!football_adapt/runs/q2/f122_r25_z0/s0/ckpts/m039024.pt
+!football_adapt/runs/q2/gru_r12_z1/s0/ckpts/m021024.pt
+!football_adapt/runs/q2/gru_r25_z0/s0/ckpts/m040032.pt
+!football_adapt/runs/q2/gru_r25_z0/s11/ckpts/m036000.pt
+!football_adapt/runs/q2/gru_r25_z0/s7/ckpts/m033024.pt
+!football_adapt/runs/q2/mlp_r12_z1/s0/ckpts/m040032.pt
+!football_adapt/runs/q2/mlp_r25_z0/s0/ckpts/m039024.pt
+!football_adapt/runs/q2/mlp_r25_z0/s11/ckpts/m038016.pt
+!football_adapt/runs/q2/mlp_r25_z0/s7/ckpts/m036000.pt
+!football_adapt/runs/q3/mix_ns_r25_z0/s0/ckpts/m005040.pt
+!football_adapt/runs/q3/mix_r25_z0/s0/ckpts/m009024.pt
+!football_adapt/runs/q3/mixw_ns_r25_z0/s0/ckpts/m010032.pt
+!football_adapt/runs/q3/mixw_r25_z0/s0/ckpts/m009024.pt
+!football_adapt/runs/q3/mixw_told_r25_z0/s0/ckpts/m004032.pt
+!football_adapt/runs/q3/oracle_r25_z0/s0/ckpts/m022032.pt
+!football_adapt/runs/q3/pm2_r25_z0/s0/ckpts/m024000.pt
+!football_adapt/runs/q3/pm3_r25_z0/s0/ckpts/m034032.pt
+!football_adapt/runs/q3/pm4_r25_z0/s0/ckpts/m039024.pt

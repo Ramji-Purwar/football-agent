@@ -1,0 +1,2 @@
+q2/mlp_r25_z0/s11: 40,032 / 40,000 matches finished (100.1%), 42 matches a minute, elapsed 15:54:56, about 00:00:00 left (evaluations not counted)
+last evaluation (after 39,024 matches, 50 matches at full strength): W 0.88, goals 3.12 - 1.56

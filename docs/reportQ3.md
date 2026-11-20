@@ -12,6 +12,7 @@ compared match by match. 500 matches per case, seeds 70000+, never used in train
 | Does the playmaker cost the unaware team? | **Yes, a lot.** Whichever midfielder he is, v4 (the best Q1 team) goes from W 0.82–0.90 to 0.02–0.41: a cost E of 0.46–0.80 W, 6–10 goals of goal difference a match. |
 | Can our team tell who he is? | **Usually, but not quickly.** From where the opponents stand relative to the ball, the guess names the right player in 99–100% of matches in three of the four cases, after 140–195 of 1,200 steps (median). With 1-3-1 and player 4 it is right in only 68%. Matches without a playmaker are the weak point: in 13–38% the guess wrongly names someone. |
 | How much of the cost does the adaptive team win back, against the unaware team and the oracle? | **Part of it, always less than the oracle.** The oracle (specialist from the kick-off) wins back κ 0.12–0.81 of the cost; the identify-then-act team 0.02–0.47. Regret against the oracle 0.08–0.20 W. |
+| Does one team for every case do better (§3.7)? | **Yes, against the playmaker, once it is started from a team that can play.** Over the 7 playmaker cases the single recurrent team mix averages W 0.70, against 0.35 for identify-then-act and 0.42 for the oracle of specialists. Without a playmaker it is worse than v4 (0.72 against 0.86). From scratch it did not learn at all. |
 
 Other findings:
 
@@ -223,6 +224,72 @@ Against opponents **without** a playmaker (50 matches per formation, seeds 20000
 1-3-1 0.11, 3-1-1 0.48; player 2 specialist 1-3-1 0.60 (v4: 0.82–0.90). Trained only against the playmaker, they
 lost v4's way of beating an ordinary opponent.
 
+### 3.7 One recurrent team for every case (θmix, told, no shadow) *(generated)*
+
+The plan's team 5 and the no-shadow check. Three GRU teams were trained on **all 24 cases at once**: every opponent
+formation (2-2-1, 2-1-2, 1-3-1, 3-1-1) × no playmaker or player 1–5 as the playmaker, drawn per match. Radius 25, ζ 0,
+seed 0.
+
+**From scratch they did not learn.** The first attempt (runs `mix_r25_z0`, `oracle_r25_z0`, `mix_ns_r25_z0`) trained
+from random weights with the same easy start as every other run. After 29,184, 28,032 and 12,960 matches they were
+still playing an opponent that acts at random 15–20% of the time (the player 2 and player 4 specialists of §3.6 were at 0–5% by then) and
+never scored more than W 0.04 in an evaluation against the full-strength opponent, losing by about 5 goals a match. They were stopped on 17 Nov and tested at
+that point: test W 0.01, 0.02 and 0.01 (table below). With every case drawn per match, a team starting from nothing
+rarely wins often enough to make the opponent harder.
+
+**So the three teams were warm-started** (runs `mixw_r25_z0`, `mixw_told_r25_z0`, `mixw_ns_r25_z0`): each starts from
+the weights of the Q2 GRU seed 0 (`runs/q2/gru_r25_z0/s0`, test W 0.93 against the full-strength 2-2-1; same
+observation and actions), with a fresh optimiser and the easy start from the beginning, then 15,000 matches on the 24
+cases (`runs/_tools/warm_start.py`). mix_told's six extra inputs (who the playmaker is) start with weight 0, so at the
+start all three teams play exactly alike and only training on the cases separates them. All three get the same start,
+so mix_told − mix and mix − mix_ns stay fair comparisons. Against adaptive and the specialists, which were trained
+from scratch for 40,000 matches, the mix teams have the advantage of a team that could already play.
+
+| team | what it is | question it answers |
+|---|---|---|
+| **mix** | GRU, not told who the playmaker is | can one team with memory handle the playmaker without identifying him explicitly? |
+| **mix_told** | the same, but its observation says which opponent is the playmaker (`actions.show_playmaker`) | how much is knowing who he is worth to such a team? (mix_told − mix) |
+| **mix_ns** | the same as mix, without the SHADOW action | is marking part of how it copes? (mix − mix_ns, the shadow value) |
+
+They play the same 11 cases and 500 seeds as §3.2, next to unaware / oracle / adaptive. A read-out of mix's memory
+(`runs/q3/probe_mix.npz`) says who it thinks the playmaker is; it was fitted on mix only, so the probe columns of
+mix_told and mix_ns in `play_all.txt` mean nothing.
+
+<!-- AUTO:q3_train -->
+| run | test W on its training cases (each seed) | still training |
+|---|---|---|
+| mixw_r25_z0 | s0 0.71 | – |
+| mixw_told_r25_z0 | s0 0.72 | – |
+| mixw_ns_r25_z0 | s0 0.85 | – |
+| mix_r25_z0 | s0 0.01 | – |
+| oracle_r25_z0 | s0 0.02 | – |
+| mix_ns_r25_z0 | s0 0.01 | – |
+| pm2_r25_z0 | s0 0.69 | – |
+| pm4_r25_z0 | s0 0.43 | – |
+| pm3_r25_z0 | s0 0.25 | – |
+<!-- /AUTO:q3_train -->
+
+<!-- AUTO:q3_play -->
+| case (formation:playmaker) | unaware | oracle | adaptive | mix | mix_ns | mix_told |
+|---|---|---|---|---|---|---|
+| 1-3-1:2 | 0.22 | 0.71 | 0.50 | 0.68 | 0.85 | 0.76 |
+| 1-3-1:3 | 0.22 | 0.22 | 0.23 | 0.69 | 0.86 | 0.65 |
+| 1-3-1:4 | 0.02 | 0.12 | 0.04 | 0.54 | 0.81 | 0.69 |
+| 2-1-2:3 | 0.37 | 0.37 | 0.37 | 0.80 | 0.91 | 0.84 |
+| 2-2-1:3 | 0.41 | 0.41 | 0.41 | 0.81 | 0.87 | 0.85 |
+| 2-2-1:4 | 0.21 | 0.46 | 0.32 | 0.74 | 0.90 | 0.84 |
+| 3-1-1:4 | 0.36 | 0.65 | 0.56 | 0.65 | 0.82 | 0.65 |
+| 1-3-1:0 | 0.82 | 0.82 | 0.80 | 0.65 | 0.85 | 0.66 |
+| 2-1-2:0 | 0.83 | 0.83 | 0.82 | 0.81 | 0.92 | 0.76 |
+| 2-2-1:0 | 0.87 | 0.87 | 0.78 | 0.75 | 0.88 | 0.81 |
+| 3-1-1:0 | 0.90 | 0.90 | 0.84 | 0.66 | 0.77 | 0.49 |
+| **mean regret vs the specialist oracle** | +0.10 | – | +0.06 | -0.13 | -0.28 | -0.15 |
+<!-- /AUTO:q3_play -->
+
+How to read it: mix against **adaptive** compares end-to-end learning with identify-then-act; mix against **oracle**
+(the specialists from the kick-off) is its regret; mix_told − mix is the value of being told; mix − mix_ns is the value
+of the SHADOW action. The verdict lines with intervals are in `docs/results_final.md`.
+
 ## 4. Conclusions for Q3
 
 1. **A playmaker can cost the unaware team the match**, but only once he has real abilities. Full vision alone did
@@ -237,6 +304,21 @@ lost v4's way of beating an ordinary opponent.
 5. **A wrong guess is expensive** because the specialists are poor against ordinary teams. A false alarm in 2-2-1
    turns a 0.63 match into 0.23.
 6. **The specialists win without marking him.** The plan's shadow action is not how this team adapts.
+7. **One team for every case (§3.7):**
+
+<!-- AUTO:q3_concl -->
+- **One team for every case needs a start.** From scratch the three mix teams did not learn (test W 0.01, 0.02, 0.01); warm-started from a team that could already play, they reached test W 0.71, 0.72, 0.85 (mix, mix_told, mix_ns) on the 24 training cases.
+- **End-to-end beats identify-then-act:** mix scores higher than the adaptive team (+0.19 W, 95% interval ±0.02, paired over the same matches). Note that mix started from a trained team (§3.7).
+- mix even beats the oracle of specialists (+0.13 W, 95% interval ±0.02, paired over the same matches).
+- **Being told who the playmaker is helps** the mix team (+0.02 W, 95% interval ±0.01, paired over the same matches).
+- The team without SHADOW scores higher than mix (-0.15 W, 95% interval ±0.01, paired over the same matches).
+<!-- /AUTO:q3_concl -->
+
+   How far these go: the intervals above are over the 500 matches per case, with one training run per team. They show
+   that *these* teams differ, not that every training run would. mix_told's gain (+0.02) is small enough to be a
+   difference between runs. The team without SHADOW is better than mix in every case, including the cases without a
+   playmaker (0.86 against 0.72), and its own training run also ended higher (test W 0.85 against 0.71). So the
+   result is that SHADOW is **not needed**, in line with conclusion 6, rather than that SHADOW hurts.
 
 ## 5. Limitations
 
@@ -252,7 +334,11 @@ lost v4's way of beating an ordinary opponent.
   design, and they are measured against the team they were tuned on.
 - **The guess learns from v4's matches.** After the switch the evidence would look different, but the guess stops at
   the commit, so this does not matter here.
-- **Not run:** team 4 (no shadow) and team 5 (one recurrent policy over all cases).
+- **Team 5 and the no-shadow team are single runs** (seed 0, §3.7), trained over all 24 cases but tested on the 11 cases that have specialists and guess maps.
+- **The mix teams are warm-started and shorter.** From scratch they did not learn (§3.7), so they start from a Q2 GRU that
+  could already beat a full-strength opponent and train 15,000 matches, against 40,000 from scratch for the specialists.
+  Their comparison with adaptive and the oracle mixes the method with this different start; the comparisons among
+  the three mix teams do not.
 - **Best-checkpoint pick.** As in Q1, the specialists' best checkpoint is the best of 40 evaluations. All W in this
   report come from new seeds.
 
@@ -270,20 +356,20 @@ lost v4's way of beating an ordinary opponent.
 The guess (on a server, from `football_adapt/`; `runs/q3/guess_c4/run_all.sh` does all three steps):
 
 ```bash
-python -m scripts.q3 record --general runs/v4/ckpts/m038016.pt --cases 2-2-1:0,2-2-1:3,2-2-1:4,2-1-2:0,2-1-2:3,1-3-1:0,1-3-1:2,1-3-1:3,1-3-1:4,3-1-1:0,3-1-1:4 \
+python -m scripts.q3 record --general runs/q1/z0_r25/s0/ckpts/m038016.pt --cases 2-2-1:0,2-2-1:3,2-2-1:4,2-1-2:0,2-1-2:3,1-3-1:0,1-3-1:2,1-3-1:3,1-3-1:4,3-1-1:0,3-1-1:4 \
        --matches 100 --seed0 30000 --out runs/q3/guess_c4/maps_rec.npz       # then tune 40000+ (50), test 60000+ (100)
 python -m scripts.q3 evaluate --maps runs/q3/guess_c4/maps_rec.npz --tune runs/q3/guess_c4/tune_rec.npz \
        --test runs/q3/guess_c4/test_rec.npz --out runs/q3/guess_c4/guess.txt
 ```
 
-The three teams on the same seeds (about one hour on er011):
+The three teams on the same seeds (about one hour on a 40-thread server):
 
 ```bash
-python -m scripts.q3 play --general runs/v4/ckpts/m038016.pt \
+python -m scripts.q3 play --general runs/q1/z0_r25/s0/ckpts/m038016.pt \
        --specialist 2:runs/q3/pm2_r25_z0/s0/ckpts/m024000.pt --specialist 4:runs/q3/pm4_r25_z0/s0/ckpts/m039024.pt \
        --maps runs/q3/guess_c4/maps_rec.npz --beta 0.05 --commit 0.95 \
        --cases 1-3-1:2,2-2-1:4,1-3-1:4,3-1-1:4,1-3-1:0,2-2-1:0,3-1-1:0,2-2-1:3,2-1-2:3,1-3-1:3,2-1-2:0 \
        --matches 500 --seed0 70000 --out runs/q3/play
 ```
 
-On the PC v4's checkpoint is `runs/q1/z0_r25/s0/ckpts/m038016.pt` (on the servers `runs/v4/ckpts/m038016.pt`).
+The unaware team (v4) is `runs/q1/z0_r25/s0/ckpts/m038016.pt` (on the training servers it was `runs/v4/ckpts/m038016.pt`).

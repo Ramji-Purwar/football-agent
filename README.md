@@ -1,110 +1,119 @@
-# football_adapt: the 5-a-side football game and its opponent
+# Structure, Information and Inference in 5-a-Side Football
 
-Code for the project described in `game.md` and `opponent.md`.
-Run everything from inside the `football_adapt/` folder (`cd football_adapt`), using `python -m ...`.
-The imports (`from football import ...`, `from opponent.controller import ...`) resolve only from there.
+CS329 course project of Arpan Gupta, Deep Buha and Ramji Purwar (IIT Gandhinagar).
 
-## Documentation
+We built a small 2D 5-a-side football game in which every player sees opponents only within a limited radius,
+trained our team with parameter-shared MAPPO against a hand-written zonal opponent, and asked three questions:
 
-| Doc | What it covers |
-|---|---|
-| [`docs/game.md`](docs/game.md) | Full game specification, calibrated parameters, observation format |
-| [`docs/opponent.md`](docs/opponent.md) | Scripted opponent — decision logic, formation switching, playmaker |
-| [`docs/codebase.md`](docs/codebase.md) | Complete module map, import paths, data flow, config system |
-| [`docs/rendering.md`](docs/rendering.md) | Current renderer + full 2D/3D renderer design guide |
-| [`docs/agents.md`](docs/agents.md) | All agent variants (random → oracle), belief filter implementation |
-| [`docs/training.md`](docs/training.md) | MAPPO algorithm, GRU sequence handling, curriculum, logging |
-| [`docs/experiments.md`](docs/experiments.md) | Q1/Q2/Q3 experiment conditions, metrics, evaluation protocol |
+| | Question | Answer (95% intervals over training seeds or paired over matches) |
+|---|---|---|
+| **Q1** | Can a formation compensate for limited vision? | **No, not measurably.** Formation as information: W +0.09 ± 0.15; enforced formation: −0.12 ± 0.16 (pooled over radii, 33 runs). The training seed matters more (one setting: W 0.18 to 0.76 across seeds). |
+| **Q2** | How fast can an opponent's formation switch be inferred, and what is it worth? | **About 30 steps, almost for free.** A Bayesian filter finds the switch in a median 28 steps and keeps 97% of the oracle's gain (regret 0.01 ± 0.04 at radius 25). End-to-end GRU/MLP teams learn robustness instead of identification. |
+| **Q3** | Can the team identify and adapt to an opponent playmaker? | **Partly.** The playmaker costs the unaware team 0.54–0.80 W. Identify-then-act recovers 2–47% of that, an oracle 12–81%, one recurrent team trained on all cases 53–81%. |
 
-## File structure
+W = wins + ½ draws on 300 held-out test matches per trained team. 65 teams were trained (about 2.5 million training
+matches).
 
-```
-football_adapt/
-├── README.md
-├── requirements.txt
-├── configs/
-│   └── default.yaml            all parameters (PLACEHOLDER values, calibrate in Phase 0)
-├── football/                   THE GAME
-│   ├── __init__.py
-│   ├── config.py               load the YAML, dotted overrides, attribute access
-│   ├── geometry.py             2D helpers, team-frame conversion (to_frame)
-│   ├── formations.py           formations, slot types, anchors
-│   ├── actions.py              the action space (all indexing lives here)
-│   ├── mechanics.py            control rating, shot probability, pass interception, tackle probability
-│   ├── observation.py          shared observation builder, action mask, flat vector, critic state
-│   └── env.py                  FootballEnv: reset(), step(), rewards, events, stats
-├── opponent/                   THE OPPONENT
-│   ├── __init__.py
-│   ├── formation_manager.py    NONE / SCHEDULED / RANDOM / SCORE_REACTIVE switching
-│   └── controller.py           ScriptedTeam: zonal defence, attack, support, playmaker
-├── agents/
-│   ├── __init__.py
-│   ├── random_agent.py         random baseline (uses the action mask)
-│   └── mappo.py                shared-policy MAPPO networks (MLP or GRU actor, central critic); needs torch
-├── training/
-│   ├── train.py                one training run: rollouts, PPO update, evaluation, checkpoints, resume
-│   └── sweep.py                a grid of training runs side by side, one core each
-├── scripts/
-│   ├── __init__.py
-│   ├── phase0_checks.py        the Phase 0 checks and the formation win matrix
-│   └── watch_match.py          render a match to a GIF
-└── tests/
-    ├── __init__.py
-    └── test_smoke.py           a few basic tests
+**Report:** [`paper/CS329_Group26_Final_Report.pdf`](paper/CS329_Group26_Final_Report.pdf) (LaTeX source in
+[`paper/`](paper/)). Longer per-question reports: [`docs/reportQ1.md`](docs/reportQ1.md),
+[`docs/reportQ2.md`](docs/reportQ2.md), [`docs/reportQ3.md`](docs/reportQ3.md).
+
+## Reproducing the results (one command)
+
+Needs Python 3.10 or newer on Linux or macOS (on Windows, use WSL). No GPU.
+
+```bash
+git clone https://github.com/Ramji-Purwar/football-agent.git
+cd football-agent
+bash reproduce.sh
 ```
 
-Still to be added by the team (not included): the belief-filter and oracle agents (`agents/belief_filter.py` is empty), `analysis/` (probes, metrics, plots).
+The first run creates `.venv/` and installs [`requirements.txt`](requirements.txt) (CPU-only torch, about 1 GB of
+downloads). Then it checks, in about 5–10 minutes:
 
-## How to use
+1. **Unit tests** of the game, the opponent, the rewards and the filters (63 tests).
+2. **Every table, figure and number of the report**, recomputed from the stored run files and compared with the
+   committed ones: `docs/results_final.md`, the tables in `docs/reportQ{1,2,3}.md`, and `paper/numbers.txt` (each number
+   quoted in the paper with the file it comes from). The recomputed figures are in `reproduce_out/paper/media/`.
+3. **Trained teams replayed**: one stored team per question is loaded and plays its 50 validation matches again with
+   the same seeds; its win score is compared with the one recorded during training.
 
-```python
-from football import FootballEnv, load_config
-from agents import RandomAgent
+It ends with `ALL CHECKS PASSED` or lists what failed. Nothing is trained, and no committed file is changed (all
+outputs go to `reproduce_out/`).
 
-cfg = load_config(overrides={"vision.radius": 15.0, "opponent.switching.mode": "SCHEDULED"})
-env = FootballEnv(cfg)                                   # our team = learner, opponent = ScriptedTeam
-obs, info = env.reset(seed=0, our_formation="2-2-1", opp_formation="1-3-1", sigma=0, zeta=2)
-agent = RandomAgent(0)
-done = False
-while not done:
-    obs, reward, done, info = env.step(agent.act(obs))   # obs["vec"] (5, dim), obs["mask"] (5, n_actions), obs["state"]
+| Option | What it adds | Extra time (8 cores) |
+|---|---|---|
+| `bash reproduce.sh --full` | the 3 teams also replay their full 300-match test (the W reported in the paper) | 10–30 min |
+| `bash reproduce.sh --all` | all 65 trained teams replay their validation matches | 30–60 min |
+
+**About exactness of replays.** On the same machine a replay is identical every time. On a different CPU or torch
+version, tiny floating-point differences in the network can change one sampled action, and from then on that match
+plays out differently, so occasionally a match ends differently. Replaying all 65 server-trained teams on our PC (50 validation
+matches each) gave the identical W for 64 of them; one (`q3/pm4_r25_z0/s0`) scored 0.39 instead of 0.41, one match
+result out of 50; `reproduce.sh` therefore accepts a
+replayed W within 0.05 (50 matches) or 0.03 (300 matches) and labels each team EXACT or CLOSE. The tables, figures and
+numbers of step 2 do not depend on this and must match exactly.
+
+## Watching a trained team
+
+```bash
+cd football_adapt
+../.venv/bin/python -m scripts.pygame_render --ckpt runs/q1/z1_r25/s0/ckpts/m039024.pt      # blue = our trained team
 ```
 
-- `FootballEnv(cfg, scripted_ours=True)` drives OUR side with the scripted team too (heuristic vs heuristic, used by Phase 0).
-- `info` carries the hidden truth for oracles and probes: `info["g"]` (opponent formation), `info["sigma"]`, `info["switch"]`.
-- Play styles: `env.reset(our_style=..., opp_style=...)` with `"normal"`, `"aggressive"` or `"defensive"` (defaults in `styles` in the config; `info["styles"]` reports them). See `docs/opponent.md`, Section 8 (the whole document has annotated pictures of how the scripted team plays).
-- `env.event_log` and `env.stats` hold passes, tackles, shots, goals, switches, shadow counts, and how long the ball spent in each third of the pitch. Compute metrics from them.
-- Call `env.set_shaping_weight(lambda_t)` from the trainer to anneal the shaping reward.
+Every run folder's `result.json` names its best checkpoint (`best_ckpt`), which is in that folder's `ckpts/`.
 
-Commands:
+## Training a team again (optional, slow)
 
-```
-python -m scripts.phase0_checks --episodes 20 --T 600 --matrix
-python -m scripts.watch_match --mode scripted --out match.gif
-python -m scripts.pygame_render --ckpt runs/stage2_easy_start/ckpt.pt        # watch a trained team (blue)
-python -m pytest -q
-python -m training.train --name sanity --T 300 --radius 100 --total-steps 600000 --workers --opp-eps-start 0.5
-python -m training.sweep --jobs 28 --radii 12,25,40,120 --zetas 0,1,2 --seeds 0,1,2 -- --total-steps 5000000 --opp-eps-start 0.5
+Training is not needed to check the results. Each run stores all its arguments in `result.json`; this prints the exact
+command that trained it:
+
+```bash
+cd football_adapt
+PYTHONPATH=. ../.venv/bin/python -m scripts.train_command runs/q1/z1_r25/s0
 ```
 
-## Things to know before you trust any result
+A full run is 40,000 matches (48 million game steps) and took 13–16 hours on a 40-thread CPU server, so it is meant for
+a server, not a laptop. Training is stochastic and the seed-to-seed spread is large (that is one of our findings), so
+a retrained team is expected to land within the spread of its setting, not on the same W. For the three warm-started
+Q3 teams (`q3/mixw_*`) the command also prints the warm-start step.
 
-1. **Numbers in `configs/default.yaml` are calibrated defaults but may need tuning.** Run Phase 0 checks first and freeze any values you change.
-2. **The playmaker effect has not been shown to work yet.** In a quick trial (not a proper experiment), a team with
-   the playmaker scored about the same as without one. Phase 0 check D will likely fail until you tune the opponent
-   (for example `opponent.attack.hub_bonus`, or make the playmaker's wider information matter more in
-   `opponent/controller.py`). Q3 depends on this, so fix it before anything else.
-3. **Balance and sample size.** Results from a handful of episodes are noisy (heuristic vs heuristic swung between
-   about 0.43 and 0.58 in small trials). Use many episodes before judging a check.
-4. `scripts/watch_match.py` and `tests/test_smoke.py` were written but not run.
+## Repository layout
 
-## Simplifications built into the code (all stated in game.md)
+```
+reproduce.sh                 the one-command check described above
+requirements.txt
+idea.pdf                     the project proposal
+paper/                       the final report: main.tex, references.bib, PRIMEarxiv.sty, media/ (figures),
+                             make_figs.py (draws every figure, writes numbers.txt), CS329_Group26_Final_Report.pdf
+docs/                        per-question reports (reportQ1-3.md), results_final.md, FINAL_REPORT.md, and the
+                             design documents: game.md, opponent.md, agents.md, training.md, experiments.md, ...
+football_adapt/              all code (run everything from inside this folder, with PYTHONPATH=.)
+  football/                  the game: config, geometry, formations, actions, mechanics, observation, env
+  opponent/                  the scripted zonal opponent, formation switching, the playmaker
+  agents/                    MAPPO actor/critic (MLP or GRU), the formation filter (Q2), the playmaker filter (Q3)
+  training/train.py          one training run: rollouts, PPO update, evaluation, checkpoints, final test
+  configs/                   default.yaml (every parameter) and study.yaml (the settings used in the study)
+  scripts/                   q2.py and q3.py (the Q2/Q3 experiments), replay_test.py, train_command.py, viewers
+  tests/                     unit tests
+  runs/                      the results of every run (see below)
+    _tools/                  final_report.py (all tables) and the evaluation helpers used during the study
+    phase0/                  the Phase 0 checks of the game and the opponent
+    q1/ q2/ q3/              one folder per setting, one sub-folder per training seed
+```
 
-- Goals come only from shots. The ball is clamped to the pitch (no throw-ins or corners).
-- A pass is decided at release (interception geometry), then the ball flies for a few steps. The player it is going to
-  walks to where it lands by himself (the game does this for a learning team). A learning team is only offered the
-  passes it can see are open.
-- Our agent moves in `n_directions` discrete directions. Macros (`HOLD_SHAPE`, `GO_TO_BALL`, `SHADOW_j`) and the
-  opponent use the same `MOVE_TO` movement routine and speed limit.
-- Teammate positions, possession, score and time are always known. Everyone sees the ball. Opponents are visible only inside the radius.
-- No side swap: both teams attack toward +x in their own frame (team 1 is rotated 180 degrees in world coordinates).
+Each trained run folder (e.g. `football_adapt/runs/q1/z1_r25/s0/`) holds `result.json` (arguments, best checkpoint,
+test result), `log.jsonl` (training and evaluation log, used for the learning curves), `config.json`, `train.log`,
+`progress.txt`, `vs_formations.txt` (Q1 teams against every opponent formation) and `ckpts/` with the checkpoints the
+results use: the best one of every run, plus the specific checkpoints the Q2 and Q3 experiments used. The other
+intermediate checkpoints (one per 1,000 training matches) and the optimiser states were left out to keep the
+repository small; the four optimiser states needed for the Q3 warm start are included.
+
+The Q2 and Q3 experiment files (`runs/q2/test/`, `runs/q2/guess*/`, `runs/q3/play*`, `runs/q3/guess_c4/`, ...) are
+the raw outputs that `final_report.py` and `paper/make_figs.py` read. The commands that produced them are listed in
+the section "Files and how to reproduce" of each report in `docs/`.
+
+## Simplifications (stated in the report)
+
+2D ground passes only; teammates and the ball are always visible, opponents only within the vision radius; opponents
+are identified by number (relaxed in Q2's "no player IDs" filter); one fixed scripted opponent.

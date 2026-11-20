@@ -1,7 +1,9 @@
-numpy
-pyyaml
-pygame>=2.6   # primary renderer (scripts/pygame_render.py)
-matplotlib    # legacy renderer (scripts/live_render.py)
-pillow        # only for saving GIFs
-pytest        # only for tests
-torch         # only for training (agents/mappo.py, training/); the CPU build is enough
+# Tested with Python 3.12: numpy 2.5, PyYAML 6.0, matplotlib 3.11, torch 2.15 (CPU build), pytest 9.2.
+numpy>=1.26
+pyyaml>=6.0
+matplotlib>=3.8
+torch>=2.2        # the CPU build is enough; no GPU is used anywhere
+pytest>=7.0
+# only for watching matches (scripts/pygame_render.py, scripts/watch_match.py):
+pygame>=2.5
+pillow>=10.0

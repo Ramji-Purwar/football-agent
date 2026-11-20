@@ -1,0 +1,100 @@
+{
+  "name": "q2/mlp_r25_z0/s0",
+  "step": 48038400,
+  "args": {
+    "name": "q2/mlp_r25_z0/s0",
+    "runs_dir": "runs",
+    "seed": 0,
+    "actor": "mlp",
+    "our_formation": "2-2-1",
+    "our_formations": null,
+    "opp_formations": [
+      "2-2-1"
+    ],
+    "opp_styles": null,
+    "sigmas": [
+      "0"
+    ],
+    "cases": null,
+    "radius": 25.0,
+    "zeta": 0,
+    "switching": "WINDOW",
+    "T": null,
+    "recipe": "configs/study.yaml",
+    "set": [],
+    "total_steps": 48000000,
+    "n_envs": 48,
+    "workers": true,
+    "torch_threads": 20,
+    "rollout_len": 1200,
+    "seq_len": 32,
+    "hidden": 256,
+    "lr_actor": 0.0003,
+    "lr_critic": 0.001,
+    "gamma": 0.99,
+    "lam": 0.95,
+    "value_norm": true,
+    "clip": 0.2,
+    "epochs": 5,
+    "batch_size": 1024,
+    "entropy_coef": 0.01,
+    "value_coef": 0.5,
+    "max_grad_norm": 0.5,
+    "shaping_anneal_end": 5000000,
+    "shaping_floor": 0.0,
+    "opp_eps_start": 0.5,
+    "matches": 40000,
+    "eval_every": 1000,
+    "eval_interval": 1200000,
+    "eval_matches": 50,
+    "eval_procs": 40,
+    "test_matches": 300,
+    "ckpt_interval": 50000,
+    "per_player": false
+  },
+  "scenario": {
+    "our_formation": "2-2-1",
+    "our_formations": null,
+    "radius": 25.0,
+    "zeta": 0,
+    "opp_formations": [
+      "2-2-1"
+    ],
+    "opp_styles": [
+      "normal"
+    ],
+    "sigmas": [
+      "0"
+    ],
+    "cases": null
+  },
+  "best_ckpt": "m039024.pt",
+  "validation": {
+    "W": 1.0,
+    "goal_diff": 10.92,
+    "goals_for": 11.36,
+    "matches": 50
+  },
+  "win": 0.99,
+  "draw": 0.0033333333333333335,
+  "goal_diff": 9.97,
+  "goals_for": 10.65,
+  "shaping_return": 0.0,
+  "passes": 24.496666666666666,
+  "pass_completion": 0.9863743142355335,
+  "passes_completed": 24.166666666666668,
+  "shots": 10.876666666666667,
+  "chance_per_shot": 0.972438159241565,
+  "poor_shots": 0.09666666666666666,
+  "missed_shots": 0.0,
+  "through_balls": 18.363333333333333,
+  "turnovers": 1.6866666666666668,
+  "possession": 0.1144638888888889,
+  "ball_own_third": 0.3198222222222222,
+  "ball_mid_third": 0.4512138888888889,
+  "ball_their_third": 0.22896388888888888,
+  "invalid_action_rate": 0.0,
+  "opp_anchor_dist": 9.176901489808701,
+  "W": 0.9916666666666667,
+  "matches": 300
+}

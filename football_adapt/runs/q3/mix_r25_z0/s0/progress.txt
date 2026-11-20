@@ -1,0 +1,2 @@
+q3/mix_r25_z0/s0: 29,184 / 40,000 matches finished (73.0%), 15 matches a minute, elapsed 09:27:01, about 12:23:49 left (evaluations not counted)
+last evaluation (after 29,040 matches, 50 matches at full strength): W 0.00, goals 0.04 - 5.56

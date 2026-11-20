@@ -1,0 +1,29 @@
+general runs/q1/z0_r25/s0/ckpts/m030000.pt
+specialist runs/q2/f122_r25_z0/s0/ckpts/m005040.pt
+teams {'gru': 'runs/q2/gru_r25_z0/s0/ckpts/m040032.pt', 'mlp': 'runs/q2/mlp_r25_z0/s0/ckpts/m039024.pt'}
+filter {'beta': 0.1, 'h': 0.0001, 'm': 1, 'anonymous': True}, starts 2-2-1, switch mode score, seeds 60000+
+all (switches on the score): 300 matches
+  none      W 0.31  goals 2.12-2.91  GD -0.79  | the opponent switches 1.8 times a match, is in 1-2-2 520 steps
+  oracle    W 0.75  goals 4.25-3.03  GD +1.22  | the opponent switches 1.2 times a match, is in 1-2-2 719 steps
+  guess     W 0.63  goals 3.50-2.87  GD +0.63  | the opponent switches 1.3 times a match, is in 1-2-2 647 steps
+  gru       W 0.83  goals 5.41-3.14  GD +2.27  | the opponent switches 1.1 times a match, is in 1-2-2 814 steps
+  mlp       W 0.93  goals 9.07-1.14  GD +7.94  | the opponent switches 1.1 times a match, is in 1-2-2 982 steps
+  regret of none      vs oracle: W +0.44 (+-0.06), GD +2.01 (+-0.25)
+  regret of guess     vs oracle: W +0.12 (+-0.05), GD +0.59 (+-0.29)
+  regret of gru       vs oracle: W -0.08 (+-0.06), GD -1.05 (+-0.41)
+  regret of mlp       vs oracle: W -0.18 (+-0.05), GD -6.72 (+-0.50)
+  guesser: found 99% of 249 switches into 1-2-2, delay median 61.0 steps (mean 81); says 1-2-2 wrongly in 43% of matches, 21.4 steps a match; misses 92 steps a match while it is 1-2-2
+  probe of gru: found 100% of 257 switches into 1-2-2, delay median 18.0 steps (mean 18); says 1-2-2 wrongly in 70% of matches, 113.8 steps a match; misses 45 steps a match while it is 1-2-2
+
+2-2-1 (switches on the score): 300 matches
+  none      W 0.31  goals 2.12-2.91  GD -0.79  | the opponent switches 1.8 times a match, is in 1-2-2 520 steps
+  oracle    W 0.75  goals 4.25-3.03  GD +1.22  | the opponent switches 1.2 times a match, is in 1-2-2 719 steps
+  guess     W 0.63  goals 3.50-2.87  GD +0.63  | the opponent switches 1.3 times a match, is in 1-2-2 647 steps
+  gru       W 0.83  goals 5.41-3.14  GD +2.27  | the opponent switches 1.1 times a match, is in 1-2-2 814 steps
+  mlp       W 0.93  goals 9.07-1.14  GD +7.94  | the opponent switches 1.1 times a match, is in 1-2-2 982 steps
+  regret of none      vs oracle: W +0.44 (+-0.06), GD +2.01 (+-0.25)
+  regret of guess     vs oracle: W +0.12 (+-0.05), GD +0.59 (+-0.29)
+  regret of gru       vs oracle: W -0.08 (+-0.06), GD -1.05 (+-0.41)
+  regret of mlp       vs oracle: W -0.18 (+-0.05), GD -6.72 (+-0.50)
+  guesser: found 99% of 249 switches into 1-2-2, delay median 61.0 steps (mean 81); says 1-2-2 wrongly in 43% of matches, 21.4 steps a match; misses 92 steps a match while it is 1-2-2
+  probe of gru: found 100% of 257 switches into 1-2-2, delay median 18.0 steps (mean 18); says 1-2-2 wrongly in 70% of matches, 113.8 steps a match; misses 45 steps a match while it is 1-2-2

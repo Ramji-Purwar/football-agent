@@ -1,9 +1,10 @@
 #!/bin/bash
+# Checkpoint paths are those of this repository (on the training servers the same files sat under runs/v4, runs/f122_r25_z0, runs/q2pick).
 # Q3 playmaker guesser: record what v4 sees in every case (maps / tuning / test seeds), then evaluate
 cd ~/fa/football_adapt
 export PYTHONPATH=.
 P="taskset -c 0-55 $HOME/fa-venv/bin/python -m scripts.q3"
-G=runs/v4/ckpts/m038016.pt
+G=runs/q1/z0_r25/s0/ckpts/m038016.pt
 CASES=2-2-1:0,2-2-1:3,2-2-1:4,2-1-2:0,2-1-2:3,1-3-1:0,1-3-1:2,1-3-1:3,1-3-1:4,3-1-1:0,3-1-1:4
 D=runs/q3/guess_c4
 $P record --general $G --cases $CASES --matches 100 --seed0 30000 --out $D/maps_rec.npz &&

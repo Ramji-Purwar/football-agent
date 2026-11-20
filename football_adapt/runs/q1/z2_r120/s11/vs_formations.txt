@@ -1,0 +1,11 @@
+runs/q1/z2_r120/s11/ckpts/m034032.pt: trained as 2-2-1, radius 120.0, zeta 2, against 2-2-1, 2-1-2, 1-3-1, 3-1-1 (normal)
+opponent style now: normal, 50 matches per formation, seeds 20000+
+
+opponent                 trained team    scripted team, same matches
+2-2-1          W 0.50  goals 3.28-2.54   W 0.62  goals 2.06-1.48
+2-1-2          W 0.39  goals 2.22-2.42   W 0.66  goals 2.34-1.64
+1-3-1          W 0.16  goals 0.46-2.26   W 0.32  goals 1.50-2.56
+1-2-2 NEW      W 0.16  goals 0.12-1.78   W 0.31  goals 1.56-2.66
+3-1-1          W 0.69  goals 3.22-1.10   W 0.55  goals 1.56-1.46
+
+W = wins + draws/2. With 50 matches a W is good to about +-0.07.

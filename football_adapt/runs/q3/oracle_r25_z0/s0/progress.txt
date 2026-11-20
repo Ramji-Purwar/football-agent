@@ -1,0 +1,2 @@
+q3/oracle_r25_z0/s0: 28,080 / 40,000 matches finished (70.2%), 15 matches a minute, elapsed 08:08:15, about 13:38:32 left (evaluations not counted)
+last evaluation (after 28,032 matches, 50 matches at full strength): W 0.00, goals 0.06 - 5.42

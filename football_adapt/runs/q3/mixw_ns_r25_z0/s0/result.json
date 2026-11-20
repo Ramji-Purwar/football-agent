@@ -1,0 +1,222 @@
+{
+  "name": "q3/mixw_ns_r25_z0/s0",
+  "step": 18028800,
+  "args": {
+    "name": "q3/mixw_ns_r25_z0/s0",
+    "runs_dir": "runs",
+    "seed": 0,
+    "actor": "gru",
+    "our_formation": "2-2-1",
+    "our_formations": null,
+    "opp_formations": null,
+    "opp_styles": null,
+    "sigmas": [
+      "0"
+    ],
+    "cases": [
+      "2-2-1:0",
+      "2-2-1:1",
+      "2-2-1:2",
+      "2-2-1:3",
+      "2-2-1:4",
+      "2-2-1:5",
+      "2-1-2:0",
+      "2-1-2:1",
+      "2-1-2:2",
+      "2-1-2:3",
+      "2-1-2:4",
+      "2-1-2:5",
+      "1-3-1:0",
+      "1-3-1:1",
+      "1-3-1:2",
+      "1-3-1:3",
+      "1-3-1:4",
+      "1-3-1:5",
+      "3-1-1:0",
+      "3-1-1:1",
+      "3-1-1:2",
+      "3-1-1:3",
+      "3-1-1:4",
+      "3-1-1:5"
+    ],
+    "radius": 25.0,
+    "zeta": 0,
+    "switching": null,
+    "T": null,
+    "recipe": "configs/study.yaml",
+    "set": [
+      "actions.shadow=false"
+    ],
+    "total_steps": 18000000,
+    "n_envs": 48,
+    "workers": true,
+    "torch_threads": 20,
+    "rollout_len": 1200,
+    "seq_len": 40,
+    "hidden": 256,
+    "lr_actor": 0.0003,
+    "lr_critic": 0.001,
+    "gamma": 0.99,
+    "lam": 0.95,
+    "value_norm": true,
+    "clip": 0.2,
+    "epochs": 5,
+    "batch_size": 1024,
+    "entropy_coef": 0.01,
+    "value_coef": 0.5,
+    "max_grad_norm": 0.5,
+    "shaping_anneal_end": 5000000,
+    "shaping_floor": 0.0,
+    "opp_eps_start": 0.5,
+    "matches": 15000,
+    "eval_every": 1000,
+    "eval_interval": 1200000,
+    "eval_matches": 50,
+    "eval_procs": 40,
+    "test_matches": 300,
+    "ckpt_interval": 50000,
+    "per_player": false
+  },
+  "scenario": {
+    "our_formation": "2-2-1",
+    "our_formations": null,
+    "radius": 25.0,
+    "zeta": 0,
+    "opp_formations": [
+      "2-2-1"
+    ],
+    "opp_styles": [
+      "normal"
+    ],
+    "sigmas": [
+      "0"
+    ],
+    "cases": [
+      [
+        "2-2-1",
+        0
+      ],
+      [
+        "2-2-1",
+        1
+      ],
+      [
+        "2-2-1",
+        2
+      ],
+      [
+        "2-2-1",
+        3
+      ],
+      [
+        "2-2-1",
+        4
+      ],
+      [
+        "2-2-1",
+        5
+      ],
+      [
+        "2-1-2",
+        0
+      ],
+      [
+        "2-1-2",
+        1
+      ],
+      [
+        "2-1-2",
+        2
+      ],
+      [
+        "2-1-2",
+        3
+      ],
+      [
+        "2-1-2",
+        4
+      ],
+      [
+        "2-1-2",
+        5
+      ],
+      [
+        "1-3-1",
+        0
+      ],
+      [
+        "1-3-1",
+        1
+      ],
+      [
+        "1-3-1",
+        2
+      ],
+      [
+        "1-3-1",
+        3
+      ],
+      [
+        "1-3-1",
+        4
+      ],
+      [
+        "1-3-1",
+        5
+      ],
+      [
+        "3-1-1",
+        0
+      ],
+      [
+        "3-1-1",
+        1
+      ],
+      [
+        "3-1-1",
+        2
+      ],
+      [
+        "3-1-1",
+        3
+      ],
+      [
+        "3-1-1",
+        4
+      ],
+      [
+        "3-1-1",
+        5
+      ]
+    ]
+  },
+  "best_ckpt": "m010032.pt",
+  "validation": {
+    "W": 0.8700000000000001,
+    "goal_diff": 1.76,
+    "goals_for": 5.0,
+    "matches": 50
+  },
+  "win": 0.8066666666666666,
+  "draw": 0.09666666666666666,
+  "goal_diff": 1.91,
+  "goals_for": 5.006666666666667,
+  "shaping_return": 0.0,
+  "passes": 26.223333333333333,
+  "pass_completion": 0.9881730734080398,
+  "passes_completed": 25.92,
+  "shots": 5.1466666666666665,
+  "chance_per_shot": 0.9657734432830763,
+  "poor_shots": 0.05,
+  "missed_shots": 0.0,
+  "through_balls": 9.16,
+  "turnovers": 1.5833333333333333,
+  "possession": 0.4426555555555556,
+  "ball_own_third": 0.38630555555555557,
+  "ball_mid_third": 0.4277138888888889,
+  "ball_their_third": 0.18598055555555557,
+  "invalid_action_rate": 0.0,
+  "opp_anchor_dist": 8.622516869717314,
+  "W": 0.855,
+  "matches": 300
+}

@@ -1,0 +1,2 @@
+q3/mixw_told_r25_z0/s0: 15,024 / 15,000 matches finished (100.2%), 15 matches a minute, elapsed 17:04:01, about 00:00:00 left (evaluations not counted)
+last evaluation (after 14,016 matches, 50 matches at full strength): W 0.73, goals 4.10 - 3.26

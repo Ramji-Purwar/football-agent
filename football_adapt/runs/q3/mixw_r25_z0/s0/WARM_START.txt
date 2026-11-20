@@ -1,0 +1,2 @@
+weights from runs/q2/gru_r25_z0/s0/ckpt.pt (step 48038400), shapes from runs/q3/mix_r25_z0/s0/ckpt.pt, step 0, fresh Adam,
+easy start from --opp-eps-start again (runs/_tools/warm_start.py)

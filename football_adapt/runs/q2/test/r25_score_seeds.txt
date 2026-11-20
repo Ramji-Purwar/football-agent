@@ -1,0 +1,43 @@
+general runs/q1/z0_r25/s0/ckpts/m030000.pt
+specialist runs/q2/f122_r25_z0/s0/ckpts/m005040.pt
+teams {'gru_s0': 'runs/q2/gru_r25_z0/s0/ckpts/m040032.pt', 'gru_s7': 'runs/q2/gru_r25_z0/s7/ckpts/m033024.pt', 'gru_s11': 'runs/q2/gru_r25_z0/s11/ckpts/m036000.pt', 'mlp_s0': 'runs/q2/mlp_r25_z0/s0/ckpts/m039024.pt', 'mlp_s7': 'runs/q2/mlp_r25_z0/s7/ckpts/m036000.pt', 'mlp_s11': 'runs/q2/mlp_r25_z0/s11/ckpts/m038016.pt'}
+filter {'beta': 0.1, 'h': 0.0001, 'm': 1}, starts 2-2-1, switch mode score, seeds 60000+
+all (switches on the score): 300 matches
+  none      W 0.31  goals 2.12-2.91  GD -0.79  | the opponent switches 1.8 times a match, is in 1-2-2 520 steps
+  oracle    W 0.75  goals 4.25-3.03  GD +1.22  | the opponent switches 1.2 times a match, is in 1-2-2 719 steps
+  guess     W 0.73  goals 4.01-3.03  GD +0.99  | the opponent switches 1.2 times a match, is in 1-2-2 715 steps
+  gru_s0    W 0.83  goals 5.41-3.14  GD +2.27  | the opponent switches 1.1 times a match, is in 1-2-2 814 steps
+  gru_s7    W 0.04  goals 0.42-3.83  GD -3.41  | the opponent switches 1.1 times a match, is in 1-2-2 75 steps
+  gru_s11   W 0.08  goals 0.94-3.16  GD -2.22  | the opponent switches 1.4 times a match, is in 1-2-2 286 steps
+  mlp_s0    W 0.93  goals 9.07-1.14  GD +7.94  | the opponent switches 1.1 times a match, is in 1-2-2 982 steps
+  mlp_s7    W 0.69  goals 2.09-1.87  GD +0.23  | the opponent switches 1.1 times a match, is in 1-2-2 836 steps
+  mlp_s11   W 0.66  goals 2.86-1.95  GD +0.90  | the opponent switches 0.8 times a match, is in 1-2-2 535 steps
+  regret of none      vs oracle: W +0.44 (+-0.06), GD +2.01 (+-0.25)
+  regret of guess     vs oracle: W +0.01 (+-0.04), GD +0.23 (+-0.24)
+  regret of gru_s0    vs oracle: W -0.08 (+-0.06), GD -1.05 (+-0.41)
+  regret of gru_s7    vs oracle: W +0.71 (+-0.05), GD +4.62 (+-0.35)
+  regret of gru_s11   vs oracle: W +0.67 (+-0.05), GD +3.43 (+-0.34)
+  regret of mlp_s0    vs oracle: W -0.18 (+-0.05), GD -6.72 (+-0.50)
+  regret of mlp_s7    vs oracle: W +0.05 (+-0.07), GD +0.99 (+-0.36)
+  regret of mlp_s11   vs oracle: W +0.09 (+-0.06), GD +0.31 (+-0.37)
+  guesser: found 100% of 255 switches into 1-2-2, delay median 33.0 steps (mean 36); says 1-2-2 wrongly in 12% of matches, 2.7 steps a match; misses 31 steps a match while it is 1-2-2
+
+2-2-1 (switches on the score): 300 matches
+  none      W 0.31  goals 2.12-2.91  GD -0.79  | the opponent switches 1.8 times a match, is in 1-2-2 520 steps
+  oracle    W 0.75  goals 4.25-3.03  GD +1.22  | the opponent switches 1.2 times a match, is in 1-2-2 719 steps
+  guess     W 0.73  goals 4.01-3.03  GD +0.99  | the opponent switches 1.2 times a match, is in 1-2-2 715 steps
+  gru_s0    W 0.83  goals 5.41-3.14  GD +2.27  | the opponent switches 1.1 times a match, is in 1-2-2 814 steps
+  gru_s7    W 0.04  goals 0.42-3.83  GD -3.41  | the opponent switches 1.1 times a match, is in 1-2-2 75 steps
+  gru_s11   W 0.08  goals 0.94-3.16  GD -2.22  | the opponent switches 1.4 times a match, is in 1-2-2 286 steps
+  mlp_s0    W 0.93  goals 9.07-1.14  GD +7.94  | the opponent switches 1.1 times a match, is in 1-2-2 982 steps
+  mlp_s7    W 0.69  goals 2.09-1.87  GD +0.23  | the opponent switches 1.1 times a match, is in 1-2-2 836 steps
+  mlp_s11   W 0.66  goals 2.86-1.95  GD +0.90  | the opponent switches 0.8 times a match, is in 1-2-2 535 steps
+  regret of none      vs oracle: W +0.44 (+-0.06), GD +2.01 (+-0.25)
+  regret of guess     vs oracle: W +0.01 (+-0.04), GD +0.23 (+-0.24)
+  regret of gru_s0    vs oracle: W -0.08 (+-0.06), GD -1.05 (+-0.41)
+  regret of gru_s7    vs oracle: W +0.71 (+-0.05), GD +4.62 (+-0.35)
+  regret of gru_s11   vs oracle: W +0.67 (+-0.05), GD +3.43 (+-0.34)
+  regret of mlp_s0    vs oracle: W -0.18 (+-0.05), GD -6.72 (+-0.50)
+  regret of mlp_s7    vs oracle: W +0.05 (+-0.07), GD +0.99 (+-0.36)
+  regret of mlp_s11   vs oracle: W +0.09 (+-0.06), GD +0.31 (+-0.37)
+  guesser: found 100% of 255 switches into 1-2-2, delay median 33.0 steps (mean 36); says 1-2-2 wrongly in 12% of matches, 2.7 steps a match; misses 31 steps a match while it is 1-2-2
