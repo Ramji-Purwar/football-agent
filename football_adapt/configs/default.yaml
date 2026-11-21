@@ -90,7 +90,8 @@ reward:
   # Potential-based shaping (Ng, Harada & Russell 1999): every player of ours gets gamma * Phi(after) - Phi(before)
   # each step. Phi = ball x where the ball is (-1 at our goal line, +1 at theirs, whoever has it) + chance x the
   # carrier's chance to score if he shot now (ours +, theirs -, 0 while the ball is loose or in flight); Phi is 0
-  # after the final whistle. It does not change which play is best, so it is never faded or capped. gamma must be
+  # after the final whistle. It does not change which play is best, so it is not capped; the trainer fades it
+  # to 0 once the easy start is over (training/train.py, docs/training.md section 6). gamma must be
   # the trainer's discount (training/train.py sets it). ball 0 and chance 0 = off.
   potential: {ball: 0.0, chance: 0.0, gamma: 0.99}
   # how much a pass would help (free to receive, open lanes): the metres it gains toward goal / gain, or the rise in

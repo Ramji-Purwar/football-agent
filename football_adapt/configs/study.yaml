@@ -9,7 +9,8 @@ reward:
   # Goals (+-100 points, the whole team) and potential-based shaping, nothing else. The shaping pays the change of
   # Phi = where the ball is (-10 at our goal line to +10 at theirs) + 30 x the carrier's chance to score (ours +,
   # theirs -). It cannot be farmed (passing back and forth, holding the ball, long shots all earn nothing), a lost
-  # ball gives back what the possession earned, and it never needs fading (it leaves the best play unchanged).
+  # ball gives back what the possession earned, and it leaves the best play unchanged. The trainer still fades it to 0 once
+  # the opponent is at full strength (training/train.py: --shaping-anneal-end), so the final teams learn from goals only.
   potential: {ball: 10.0, chance: 30.0}
   eta: 0.0
   goal: 100.0

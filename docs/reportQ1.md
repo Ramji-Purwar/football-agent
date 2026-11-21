@@ -295,7 +295,7 @@ The setting does not decide the style, the run does. The two failed runs at 12 m
 3. **The hypothesis "structure helps more at small r" is not supported by the data**: the point estimates fit it (B about +0.16 at 12 m, +0.05 at 25 m and with full vision), but every interval includes 0 (§3.1).
 4. **The hypothesis "spread is larger at large r" is not supported.** Full-vision teams are the most compact (§4.3).
 5. **More vision is not always better.** 25 m is the best radius at both structure levels.
-6. **Seed variance is a result in itself.** One setting can give test W anywhere from about 0.2 to 0.9, so claims about structure need several seeds. A comparison with one seed per setting would have shown a clean +0.37 benefit at 12 m (seed 0 alone).
+6. **Seed variance is a result in itself.** One setting can give test W anywhere from about 0.2 to 0.9, so claims about structure need several seeds. A comparison with one seed per setting would have shown a clean +0.43 benefit at 12 m (seed 0 alone: 0.60 against 0.18).
 7. **All teams overfit to the four training formations.**
 8. <!-- AUTO:q1_z2_concl -->
 **Enforcing the formation (ζ 2) on top of the spot** changes test W against ζ 0 by +0.07 ± 0.43 at 12 m, -0.22 ± 0.35 at 25 m, -0.20 ± 0.34 at full (120 m) (3 ζ 2 seeds against 4 ζ 0 seeds). No interval excludes 0: the control penalty does not change the result by more than the seeds do.
