@@ -212,14 +212,13 @@ mark him). The observation $o_i^t$ holds the player's own position and home spot
 possession, score, time, and the opponents within radius $r$ (the others are set to zero with a ``not seen'' flag). The
 team reward at step $t$ is
 \begin{equation}
-R^t=100\,(\text{goal for}-\text{goal against})+w_t\big[\gamma\Phi(s^{t+1})-\Phi(s^t)\big],\qquad
+R^t=100\,(\text{goal for}-\text{goal against})+\gamma\Phi(s^{t+1})-\Phi(s^t),\qquad
 \Phi(s)=10\,p(b)+30\,q(s),
 \label{eq:reward}
 \end{equation}
 where $p(b)\in[-1,1]$ is how far up the pitch the ball is and $q(s)$ is the probability that the ball carrier would
-score if he shot now (positive for us, negative for them; Section~\ref{sec:method}). The weight $w_t$ of the shaping
-starts at 1 and is reduced to 0 later in training, and $\gamma=0.99$ (Algorithm~1, Section~\ref{sec:learning}); for each fixed $w_t$ the shaping does
-not change the best policy, and at the end only goals count. Training looks for
+score if he shot now (positive for us, negative for them; Section~\ref{sec:method}). We use $\gamma=0.99$ (Algorithm~1) and keep the
+shaping for the whole run: being potential-based, it does not change which policy is best. Training looks for
 $\hat\theta\approx\arg\max_\theta\mathbb E\big[\sum_t\gamma^tR^t\big]$.
 
 \textbf{Q1.} Let $W_\zeta(r)$ be the win score of teams trained with structure level $\zeta$ and vision radius $r$.
@@ -271,8 +270,8 @@ larger at small $r$.
 
 \textbf{Game.} Five against five on a $100\times60$\,m pitch with 12\,m goals and no goalkeepers, 1{,}200 steps per
 match (Figure~\ref{fig:viewer}). All ten players act at the same time. Passes travel along the ground and are
-intercepted if a defender can reach the ball's path in time; a pass is offered only if no defender \emph{the passer can
-see} could reach it, so an unseen defender can still intercept. A tackle is possible within 2\,m of the ball carrier and wins the ball with probability
+intercepted if a defender can reach the ball's path in time; a pass is offered only if no defender \emph{the passer or the
+receiver can see} could reach it, so an unseen defender can still intercept. A tackle is possible within 2\,m of the ball carrier and wins the ball with probability
 $c_{\text{def}}/(c_{\text{def}}+c_{\text{carrier}})$ (one half between equal players). A pass has an aiming error
 proportional to $\sqrt{1-c}$ (none for $c\ge1$). A shot from inside the goal area ($5.5\times23$\,m) always scores, since there is no goalkeeper; from further out
 it scores with probability $0.8\,e^{-d/30}\times\text{openness}\times c$, where $d\le35$\,m is the distance to goal,
@@ -299,8 +298,7 @@ $W=0.14$, so vision matters in this game. (Here, as everywhere, $W$ is that of t
 \small
 \textbf{Algorithm 1:} Parameter-shared MAPPO with an easy start (one training run)
 \begin{enumerate}[leftmargin=2em,itemsep=0pt]
-\item Initialise actor $\pi_\theta$ (MLP or GRU) and critic $V_\phi$ from the seed; opponent randomness $\epsilon=0.5$;
-shaping weight $w=1$.
+\item Initialise actor $\pi_\theta$ (MLP or GRU) and critic $V_\phi$ from the seed; opponent randomness $\epsilon=0.5$.
 \item Repeat until 40{,}000 matches are played:
 \begin{enumerate}[leftmargin=1.5em,itemsep=0pt]
 \item Play 48 matches in parallel (1{,}200 steps each). Every step, each of our 5 players samples
@@ -311,8 +309,6 @@ its rules. Store $o_i^t,a_i^t$, the full state $s^t$ and the reward $R^t$ (Eq.~\
 the returns: 5 epochs, minibatches of 1{,}024, learning rates $3\cdot10^{-4}$ and $10^{-3}$.
 \item Easy start: after every 50 training matches, if our win score was $\ge0.6$ lower $\epsilon$ by 0.05 (down to the
 full-strength opponent); if it was $\le0.4$, raise it by 0.05.
-\item Once the opponent is at full strength, lower $w$ linearly to 0 over the next 5 million game steps (about
-4{,}200 matches).
 \item Every 1{,}000 matches save a checkpoint and evaluate it on 50 fixed matches against the full-strength opponent.
 \end{enumerate}
 \item Test the best checkpoint on 300 new matches (seeds never used before, so choosing the best checkpoint does
@@ -326,7 +322,7 @@ We use parameter-shared MAPPO~\cite{yu2022mappo} (Algorithm~1). The actor and th
 \textbf{easy start} is needed because a new team cannot score against the full-strength opponent at all, so it would
 never see a goal and never learn; making the opponent partly random at first, and stronger as soon as we win, keeps the
 opponent at a level our team can just beat. The \textbf{shaping} (Eq.~\ref{eq:reward}) guides the team towards the
-goal early on; it is faded out once the opponent is at full strength, so the final teams are trained on goals only. A
+goal; it stays on for the whole run, which is safe because it cannot change which policy is best. A
 run took 13--16 hours on one 40-thread CPU server.
 
 \subsection{Solution for each question}
@@ -455,7 +451,7 @@ few to test this. No difference excludes 0.
 the scripted team placed in our team's position scores only 0.07; the learned teams score 0.45--0.61. The scripted
 team relies on what it sees, while the learned team plays a style that needs little vision: defend deep, win the ball,
 and break quickly (at 12 and 25\,m, 83--93\% of their goals came from moves with two or more passes, starting in their
-own third). Small vision still costs: at 12\,m passes that look safe are intercepted by defenders the passer cannot
+own third). Small vision still costs: at 12\,m passes that look safe are intercepted by defenders our players cannot
 see. The best radius was 25\,m, not full vision: with full vision the teams kept the ball longer and took worse shots
 (average chance of scoring 0.60--0.70 against 0.82--0.85), although the seed spread is too large to call this a tested
 difference.
@@ -671,12 +667,12 @@ with confidence intervals, tables and figures. & Completed \\
 \toprule
 Proposal & What was run & Why \\
 \midrule
-Shaped reward, annealed, plus outcome bonus & Goals $\pm100$ plus potential-based shaping, faded to 0 after the easy
-start & potential-based shaping cannot change the best policy or be farmed \\
+Shaped reward, annealed, plus outcome bonus & Goals $\pm100$ plus potential-based shaping, kept for the whole run &
+potential-based shaping cannot change the best policy or be farmed, so it needs no annealing \\
 Three radii plus full vision, in Q1 and Q3 & 12, 25 and full (120\,m) in Q1; 25 only in Q3 & compute \\
 3 seeds per setting, 5 on main settings & 4 seeds ($\zeta=0,1$), 3 ($\zeta=2$); 4 for 1-3-1 and 1-2-2 at 12\,m &
 compute; seeds added where results disagreed \\
-Opponent formation drawn from all 5 & 4 (1-2-2 held out) & 1-2-2 is far stronger; used as the Q2 target \\
+Opponent formation drawn from all 5 & 4 (1-2-2 held out) & kept unseen as the Q2 target (in Phase 0 it is the strongest formation in the worst case) \\
 Q2: policy given the filter's belief; several formation pairs & specialist takes over on the filter's guess; one target
 (1-2-2); MLP added & measures the value of the guess; one specialist per target; tests whether memory helps \\
 Q3: playmaker = full vision only, any position & full vision + passing preference + free role + control 4;

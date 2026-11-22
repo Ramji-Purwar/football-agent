@@ -1,8 +1,11 @@
 # opponent.md: The Scripted Team
 
+**Status.** This document describes the scripted team in the code, with all its options. The Q1-Q3 study used the
+normal style, the formations and switching modes named in the report, and the playmaker of Section 10.
+
 This document describes how the rule-based team plays. The code is `ScriptedTeam` in `football_adapt/opponent/controller.py`. It is the opponent (red, team 1) in every experiment, and it can drive our side as well (`FootballEnv(cfg, scripted_ours=True)`), which is how the Phase 0 checks and the pictures below are made. Read `game.md` first: the scripted team plays under the same rules and physics as our team.
 
-**In one paragraph.** Each player has a home position that comes from the team's formation and slides between an attacking and a defending shape with possession. Without the ball the team defends zones: the nearest player presses, a second can join, one covers, and the rest shift toward the ball. With the ball the carrier shoots, passes forward, carries, or lays the ball off under pressure, using only what that player can see, while teammates make runs and offer passes. A play style (normal, aggressive or defensive) changes how high the team stands and how it presses. The team can switch formation during a match, and one player can be a playmaker with unlimited vision.
+**In one paragraph.** Each player has a home position that comes from the team's formation and slides between an attacking and a defending shape with possession. Without the ball the team defends zones: the nearest player presses, a second can join, one covers, and the rest shift toward the ball. With the ball the carrier shoots, passes forward, carries, or lays the ball off under pressure, using only what that player can see, while teammates make runs and offer passes. A play style (normal, aggressive or defensive) changes how high the team stands and how it presses. The team can switch formation during a match, and one player can be a playmaker (Section 10).
 
 **Reading the pictures.** Every picture is a real moment from a scripted match, with the players' decisions drawn on top. Red circles are the team being explained, and red attacks to the **left**. Blue triangles are the other side (scripted too, normal style). The letter under a player is the role: D defender, M midfielder, F forward. Section 16 says how the pictures are made.
 
@@ -29,8 +32,8 @@ The opponent is a **fixed, hand-written team that does not learn**. It must sati
 |---|---|
 | Holds its formation (players near anchors) | Q2 requires the formation to be readable from player positions |
 | Vision-limited (each player sees only within `R_VISION`) | Prevents information advantage that would break Q1/Q2 |
-| Can switch formation mid-match (3 modes) | Q2 |
-| One player can be a playmaker (infinite vision) | Q3 |
+| Can switch formation mid-match (4 modes) | Q2 |
+| One player can be a playmaker (unlimited vision, free role, control 4: Section 10) | Q3 |
 | Worthwhile opponent (random policy loses clearly) | Learning results must be meaningful |
 | Reproducible (same seed → same match) | Paired evaluation and debugging |
 | Same physics as our team (no teleporting) | Fairness |
@@ -262,7 +265,7 @@ score = w_fwd  * forward gain            (metres gained toward goal / pitch leng
       + w_open * openness of the target  (distance to the nearest visible defender, capped at 15 m, / 15)
       - w_dist * pass length / pitch length
       + pass_bias for the receiver's role (defender -0.1, midfielder 0, forward +0.1)
-      + hub_bonus   if the receiver is the playmaker            (0.3)
+      + hub_bonus   if the receiver is the playmaker            (1.0)
       + through.bonus if it is a through ball                    (0.1)
       + one_two_bonus if the receiver has just passed and is running on  (0.4, see 7.1)
 ```
@@ -509,6 +512,7 @@ Set via `opponent.switching.mode`. The minimum time between two switches is `dwe
 | `NONE` | Formation never changes (default; used in Q1, Q3) |
 | `SCHEDULED` | Switch once at step `t_switch` (default 600) to `target` (default `"1-2-2"`) |
 | `RANDOM` | After `dwell_min`, switch each step with probability `h_switch` (default 0.005) to a random other formation |
+| `WINDOW` | Switch once to `window.target` (`"1-2-2"`) at a step drawn for each match from `t_min`..`t_max` (100..1100). The Q2 test |
 | `SCORE_REACTIVE` | Every `check_interval` (50) steps: if trailing by `trail_thresh` (1) or more, switch to `f_att` (`"1-2-2"`); if leading by `lead_thresh` (1) or more, switch to `f_def` (`"3-1-1"`); otherwise stay |
 
 The manager keeps `formation` (the current name) and `dwell` (steps since the last switch; it starts very large so the first switch is never blocked). Our side, when scripted, never switches by itself.
@@ -531,10 +535,21 @@ During the transition the players are far from their new anchors, so their contr
 
 ## 10. The Playmaker Variant (Q3)
 
-When `sigma > 0`, the opponent player with number `sigma` is the playmaker.
+When `sigma > 0`, the opponent player with number `sigma` is the playmaker. The settings are in `opponent.playmaker`
+and `opponent.attack.hub_bonus`. The final playmaker of the Q3 study has four abilities (`docs/reportQ3.md`, Section 2.1,
+says how they were chosen: vision alone cost our trained team almost nothing):
 
 | Aspect | Normal player | Playmaker |
 |---|---|---|
+| Vision radius | 25 m | Unlimited (pass safety check, interception at the kick and ball-side shift use every player) |
+| Teammates' passes | | Teammates add `hub_bonus` = 1.0 to the pass score when passing to him |
+| Position in possession | Zone and support rules (Sections 4 and 7) | Free role (`free_role: true`): he leaves his zone and shows in the free space next to the carrier |
+| Control rating | 0.5 to 1, by distance from his anchor | 4 everywhere (`control: 4.0`): he wins most tackles, his passes have no aiming error, and an open shot inside 35 m nearly always scores |
+
+His passes fly at normal speed (`pass_speed: 1.0`; faster passes were tried and dropped because they gave him away).
+In the study only midfielders are playmakers. The viewer draws the playmaker with a gold ring.
+
+---|---|---|
 | Vision radius | 25 m | Unlimited |
 | Ball-side shift | Only when the ball is inside the radius | Always (the ball is always visible) |
 | Pass safety check | Only visible defenders | All defenders |
@@ -578,7 +593,7 @@ Everything below is under `opponent.` in `default.yaml` unless it says otherwise
 | `attack.pass_min` | 0.3 | Bar for a forward or square pass |
 | `attack.open_max` | 15.0 | Cap on distances used as "room" (m) |
 | `attack.fwd_cap` | 1.0 | Cap on the forward-gain term (1.0 = no cap) |
-| `attack.hub_bonus` | 0.3 | Pass-score bonus for passing to the playmaker |
+| `attack.hub_bonus` | 1.0 | Pass-score bonus for passing to the playmaker |
 | `attack.safe_slack` | 1.5 | Extra steps a defender must be late before a pass counts as safe |
 | `attack.lane_margin` | 1.5 | Extra clearance from defenders along the ball's path (m) |
 | `attack.call` | true | For a pass to a teammate, the defenders that teammate sees count as well as the carrier's own (Section 6.2) |
@@ -626,6 +641,7 @@ Everything below is under `opponent.` in `default.yaml` unless it says otherwise
 | `switching.*` | mode NONE | Formation switching (9.2) |
 | `zone.eps_arrive`, `transition_max` | 1.0, 60 | End of a formation transition (9.3) |
 | `playmaker.sigma` | 0 | Playmaker's player number, 0 = none (Section 10) |
+| `playmaker.free_role`, `control`, `pass_speed` | true, 4.0, 1.0 | The playmaker's free role, control rating and pass speed (Section 10) |
 | `randomness.eps_opp` | 0.0 | Probability of a random action |
 | `block.*`, `width.attack`, `width.defend`, `roles.push_scale`, `roles.drop_scale` | 0 (off) | Older whole-team shifts, replaced by the shapes |
 
@@ -639,7 +655,6 @@ Everything below is under `opponent.` in `default.yaml` unless it says otherwise
 | `opponent/formation_manager.py` | `FormationManager`: when to switch formation |
 | `football/config.py` | `apply_style`: a team's view of the config in its play style |
 | `football/formations.py` | Anchors, attacking and defending shapes |
-| `scripts/doc_screenshots.py` | Makes the pictures in this document |
 
 Where each behaviour lives in `controller.py`:
 
@@ -714,7 +729,8 @@ Run `python -m scripts.phase0_checks --episodes 100` from `football_adapt/`. All
 
 Options: `--matrix` prints the formation win matrix, `--styles` the play-style win matrix, `--T` shortens the matches.
 
-Results on 2026-10-07, with everything in this document in place and both teams in the normal style:
+The Phase 0 checks of the final game (300 matches per line) are in `football_adapt/runs/phase0/phase0.txt` and in the
+report. The table below is an earlier run, on 2026-10-07, with both teams in the normal style:
 
 | Check | 20 episodes | Note |
 |---|---|---|
@@ -744,12 +760,7 @@ Results on 2026-10-07, with everything in this document in place and both teams 
 
 ## 16. The Pictures
 
-The pictures are made by `football_adapt/scripts/doc_screenshots.py`. Each one plays scripted matches with fixed seeds, looks for a step where the behaviour happens, and draws that step with the viewer's own drawing code plus arrows and labels for what the players decided. Nothing is staged: the positions are the ones the players saw on that step.
-
-```bash
-cd football_adapt
-python -m scripts.doc_screenshots                        # all pictures, a few minutes
-python -m scripts.doc_screenshots --only lanes,pressing  # some of them
-```
-
-It needs `pygame` and opens no window. Run it again after changing the scripted team, so the pictures match the behaviour. The match is deterministic, so the same code gives the same pictures.
+The pictures were made during development by a screenshot script that is not part of this repository. Each one played
+scripted matches with fixed seeds, looked for a step where the behaviour happens, and drew that step with the viewer's
+own drawing code plus arrows and labels for what the players decided. Nothing was staged: the positions are the ones
+the players saw on that step. They were made with an earlier version of the code, and the final playmaker of Section 10 is not in them.

@@ -25,7 +25,7 @@ radius 12 W 0.07 +-0.06, goal difference 0.34 +-0.32 (from 2-2-1: W 0.12 +-0.07;
 Not switching at all loses W 0.29 (radius 25) and 0.28 (radius 12).
 
 The guesser found every switch. Median delay 28 steps at radius 25, 36 at radius 12 (the opponent players need up to
-60 steps to walk to their new spots). False alarms: none at radius 25, in 1% of the matches at radius 12. Steps on the
+60 steps to walk to their new spots). False alarms: none at radius 25, in 1 of the 300 matches at radius 12. Steps on the
 wrong team after the switch, a match: 31 at radius 25, 59 at radius 12.
 
 ## Notes

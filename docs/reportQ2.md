@@ -21,7 +21,7 @@ again after new results arrive; it replaces only those blocks.
 ### 2.1 The switch
 
 The opponent (the scripted zonal team) starts in 2-2-1 and switches to **1-2-2** once, at a random step between 100
-and 1100 of the 1,200. 1-2-2 is the strongest formation and one the general team never trained against: it wins
+and 1100 of the 1,200. 1-2-2 is a formation the general team never trained against: it wins
 W 0.04 against it. Radius 12 also starts from 3-1-1. A second test lets the opponent switch **on the score**: it goes to
 1-2-2 when it trails and to 3-1-1 when it leads, checked every 50 steps.
 
@@ -73,10 +73,10 @@ switch matches: β 0.1, h 0.0001, m 1. Tested on 300 new matches (seeds 60000+);
 - **The guess is as good as being told.** Median delay 28 steps (mean 29), every switch found, no false alarm. It
   is on the wrong team about 31 steps a match after the switch.
 - **Not switching costs 0.29 W**: the general team is outscored 0.59 – 2.20 after the switch.
-- **Adaptation lag** (goal-difference rate per 100 steps, aligned at the switch). The oracle and the guess get back
-  to their pre-switch rate after about 220–230 steps, because the specialist starts mid-match and needs time to settle.
-  The GRU loses nothing at the switch (+0.14 before, +0.22 to +0.35 after). The MLP's rate drops from +1.03 to about
-  +0.6–0.8 but stays far above the others.
+- **Adaptation lag** (goal-difference rate per 100 steps). The oracle and the guess score below their pre-switch rate
+  for a few hundred steps after the handover, because the specialist starts mid-match and needs time to settle. The GRU
+  loses nothing at the switch (+0.19 before, +0.26 after; table in §3.3). The MLP's rate drops from +0.86 to +0.70 but
+  stays far above the others.
 
 Switching on the score (300 matches): none 0.31, oracle 0.75, guess 0.73 (regret 0.01 ± 0.04), gru 0.83, mlp 0.93.
 This test is new to the GRU and MLP, which never met an opponent that also goes to 3-1-1, and both drop (0.96 → 0.83,
@@ -114,7 +114,7 @@ This test is new to the GRU and MLP, which never met an opponent that also goes 
 <!-- /AUTO:q2_switch -->
 
 Radius 12, from the guesser's own test (`runs/q2/guess/README.md`): none 0.25, oracle 0.53, guess 0.46 (regret
-0.07 ± 0.06), median delay 36 steps, false alarms in 1% of matches. The guess sometimes drops back to the general team
+0.07 ± 0.06), median delay 36 steps, a false alarm in 1 of the 300 matches. The guess sometimes drops back to the general team
 after the handover (59 wrong-team steps a match), which the tuning matches could not show.
 
 ### 3.3 Training the end-to-end teams, and every seed on the switch test *(generated)*
@@ -190,7 +190,7 @@ suggests the GRU plays in a way that works against both formations rather than i
   Their W is not comparable with the fully trained GRU/MLP.
 - **Seeds.** The pair and the guesser are single runs. The end-to-end teams have three seeds each at radius 25 (§3.3)
   and one at radius 12. Two of the three GRU seeds failed to learn, so the GRU result of §3.1 rests on its one good seed.
-- **Mid-match handover.** A specialist that comes on mid-match plays below its kick-off level for about 200 steps
+- **Mid-match handover.** A specialist that comes on mid-match plays below its kick-off level for a few hundred steps
   (adaptation lag), and this counts against both the oracle and the guess.
 - **The memory read-out is linear.** A non-linear probe might find more in the GRU's state. The point stands that the
   team does not act on a formation belief.

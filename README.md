@@ -9,7 +9,7 @@ trained our team with parameter-shared MAPPO against a hand-written zonal oppone
 |---|---|---|
 | **Q1** | Can a formation compensate for limited vision? | **No, not measurably.** Formation as information: W +0.09 ± 0.15; enforced formation: −0.12 ± 0.16 (pooled over radii, 33 runs). The training seed matters more (one setting: W 0.18 to 0.76 across seeds). |
 | **Q2** | How fast can an opponent's formation switch be inferred, and what is it worth? | **About 30 steps, almost for free.** A Bayesian filter finds the switch in a median 28 steps and keeps 97% of the oracle's gain (regret 0.01 ± 0.04 at radius 25). End-to-end GRU/MLP teams learn robustness instead of identification. |
-| **Q3** | Can the team identify and adapt to an opponent playmaker? | **Partly.** The playmaker costs the unaware team 0.54–0.80 W. Identify-then-act recovers 2–47% of that, an oracle 12–81%, one recurrent team trained on all cases 53–81%. |
+| **Q3** | Can the team identify and adapt to an opponent playmaker? | **Partly.** The playmaker costs the unaware team 0.54–0.80 W. Identify-then-act recovers 2–47% of that, an oracle 12–81%, one recurrent team trained on all cases (warm-started from a trained team) 53–81%, and the same team without the marking action 85–105%. |
 
 W = wins + ½ draws on 300 held-out test matches per trained team. 65 teams were trained (about 2.5 million training
 matches).
@@ -17,6 +17,33 @@ matches).
 **Report:** [`paper/CS329_Group26_Final_Report.pdf`](paper/CS329_Group26_Final_Report.pdf) (LaTeX source in
 [`paper/`](paper/)). Longer per-question reports: [`docs/reportQ1.md`](docs/reportQ1.md),
 [`docs/reportQ2.md`](docs/reportQ2.md), [`docs/reportQ3.md`](docs/reportQ3.md).
+
+## Results (screenshots)
+
+A test match in our viewer (blue: our trained team; red: the scripted opponent):
+
+![A test match](docs/img/viewer.png)
+
+**Q1. A formation does not measurably help.** (a) Test W of all 33 runs (dots: single training seeds; lines: means).
+(b) Benefit of a formation over no formation, with 95% intervals: every interval crosses 0. The spread between seeds
+of the same setting is larger than any difference between settings.
+
+![Q1 results](docs/img/paper/q1_main.png)
+
+**Q2. A formation switch is detected in about 30 steps.** (a, b) W when the opponent switches to 1-2-2 at a random
+time: acting on the Bayesian filter's guess (orange) is almost as good as being told the switch (green). (c) Training
+curves of the end-to-end teams: only one of three GRU seeds learned to win, all three MLP seeds did.
+
+![Q2 results](docs/img/paper/q2.png)
+
+**Q3. Adapting to a playmaker.** W of each team in the seven playmaker cases; the black tick is the unaware team without
+a playmaker, so its distance to the grey dot is what the playmaker costs. One recurrent team trained on all cases (blue)
+wins back the most.
+
+![Q3 results](docs/img/paper/q3.png)
+
+These images are the figures of the report (`paper/media/*.pdf`, drawn by `paper/make_figs.py`); `bash reproduce.sh`
+redraws them from the stored run files.
 
 ## Reproducing the results (one command)
 
@@ -87,8 +114,11 @@ idea.pdf                     the project proposal
 paper/                       the final report: main.tex, references.bib, PRIMEarxiv.sty, media/ (figures),
                              make_figs.py (draws every figure, writes numbers.txt), CS329_Group26_Final_Report.pdf
 docs/                        the detailed per-question reports (reportQ1-3.md), results_final.md (every table,
-                             generated), questions.md (the original plan), and the specifications of the game,
-                             the opponent and the training that the code refers to (game.md, opponent.md, training.md)
+                             generated), questions.md (the original plan), and the design specifications of the game,
+                             the opponent and the trainer written during development (game.md, opponent.md,
+                             training.md; where they describe plans, the report and the reports in docs/ say what
+                             was run);
+                             img/paper/ holds PNG copies of the report's figures for this README
 football_adapt/              all code (run everything from inside this folder, with PYTHONPATH=.)
   football/                  the game: config, geometry, formations, actions, mechanics, observation, env
   opponent/                  the scripted zonal opponent, formation switching, the playmaker

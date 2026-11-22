@@ -1,6 +1,8 @@
 # training.md: Training Protocol and MAPPO Implementation
 
-This document covers the full training pipeline: the MAPPO algorithm, GRU sequence handling, reward engineering, curriculum, hyperparameters, and what to log. Read `game.md` (Sections 9–12) and `agents.md` first.
+This document covers the full training pipeline: the MAPPO algorithm, GRU sequence handling, reward engineering, curriculum, hyperparameters, and what to log. Read `game.md` (Sections 9–12) first.
+
+**Status.** Sections 0, 4, 6, 7 (easy start) and 9 describe the trainer as it is in `training/train.py`. Sections 2, 3 and 8 are the design sketches it was built from, and the stages and evaluation plan at the end of Section 7 and in Section 10 were the original plan. What the study actually ran is in the final report (`paper/`, Algorithm 1) and in `docs/reportQ1.md` to `reportQ3.md`; every run's exact arguments are in its `result.json`.
 
 ---
 
@@ -13,7 +15,7 @@ Sections 1 to 6 describe the method. This section is how to run the code that im
 python -m training.train --name sanity --T 300 --radius 100 --total-steps 600000 --workers --opp-eps-start 0.5
 # Stage 2: full matches, default vision
 python -m training.train --name easy --total-steps 2000000 --workers --opp-eps-start 0.5
-# a grid of runs, one core each (here the Q1 grid with 3 seeds)
+# a grid of runs, one core each (an example grid, not the study's)
 python -m training.sweep --jobs 28 --formations 2-2-1,2-1-2,1-3-1,1-2-2,3-1-1 --radii 12,25,40,120 --zetas 0,1,2 \
        --seeds 0,1,2 -- --total-steps 5000000 --opp-eps-start 0.5
 ```
@@ -26,13 +28,13 @@ python -m training.sweep --jobs 28 --formations 2-2-1,2-1-2,1-3-1,1-2-2,3-1-1 --
 | Many runs at once | `training.sweep --jobs N`: one process per run, `N` at a time. Everything after `--` goes to every run |
 | The setting | `--our-formation`, `--radius`, `--zeta` are fixed for a run. `--opp-formations`, `--opp-styles`, `--sigmas` take comma lists, and one value is drawn at every kick-off. `--switching` sets the opponent's switching mode, `--T` the match length |
 | Any other config value | `--set key=value`, for example `--set reward.w_progress=0.005` (can be repeated) |
-| Actor | `--actor mlp` (memoryless) or `--actor gru`. The belief-augmented and oracle variants are not written yet |
+| Actor | `--actor mlp` (memoryless) or `--actor gru`. The belief-augmented and oracle networks of the original plan were not built: Q2 and Q3 use filters and hand-overs to specialist teams instead (`scripts/q2.py`, `scripts/q3.py`) |
 | Easy start | `--opp-eps-start 0.5`, see Section 7 |
 | Training by whole matches | `--matches N --eval-every M`: every update is one full match of each game. N matches in all, an evaluation every M. (`--lam 1.0` with it, tried in October 2026, judged every choice by the whole rest of the match and never won a match in 55,000) |
 | Study recipe | `--recipe configs/study.yaml`: the config values of the Q1-Q3 study (`docs/questions.md`): goals plus potential-based shaping only (`game.md`, Section 9), the 8 directions off the ball at every structure level, HOLD_SHAPE to the player's own formation spot. `--set` values win over it |
 | Evaluation | Every `--eval-interval` steps, `--eval-matches` matches on fixed seeds (10000, ...) against the opponent at full strength. Every evaluation keeps its checkpoint in `runs/<name>/ckpts/`; at the end the best of them plays `--test-matches` (300) matches on seeds no evaluation used (50000, ...), and that is the run's result in `result.json` |
 | Watching the learning | Every update logs `ev_return` (how much of the return that really followed the critic explains: near 0 means it carries no credit back to earlier choices), `approx_kl` and `clip_frac` (how far the update moved the policy) |
-| Watching a trained team | `python -m scripts.pygame_render --ckpt runs/<name>/ckpt.pt` (it is the blue team). Add `--opp-eps 0.45` for the weakened opponent it trains against. `scripts.watch_match` takes the same two flags and writes a GIF |
+| Watching a trained team | `python -m scripts.pygame_render --ckpt runs/<name>/ckpt.pt` (it is the blue team; in this repository use the checkpoint named `best_ckpt` in the run's `result.json`, which is in its `ckpts/`). Add `--opp-eps 0.45` for the weakened opponent it trains against |
 | Using a trained team in code | `MAPPOAgent.load("runs/<name>/ckpt.pt")` in `agents/mappo.py` has the same `act(obs)` as `RandomAgent` |
 
 Speed: one core plays about 375 game steps per second. With `--workers` on 8 games a 12-core laptop reached about 650 to 830 steps per second for the MLP actor. The GRU update costs more (about 3.6 s per 2048 game steps on one core against 6 s of simulation).
@@ -45,7 +47,7 @@ We use **Multi-Agent PPO (MAPPO)** with full parameter sharing: all 5 of our pla
 
 **Key design choices:**
 - Centralized training, decentralized execution (CTDE)
-- Actor input: per-player observation vector (79-dim)
+- Actor input: per-player observation vector (83-dim)
 - Critic input: full global state (51-dim) — sees everything including hidden truth
 - One shared actor update per training batch (gradients from all 5 players)
 - One shared critic update per training batch
@@ -65,7 +67,7 @@ We use **Multi-Agent PPO (MAPPO)** with full parameter sharing: all 5 of our pla
 import torch.nn as nn
 
 class MemorylessActor(nn.Module):
-    def __init__(self, obs_dim=79, n_actions=23, hidden=256):
+    def __init__(self, obs_dim=83, n_actions=27, hidden=256):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(obs_dim, hidden), nn.ReLU(),
@@ -73,7 +75,7 @@ class MemorylessActor(nn.Module):
             nn.Linear(hidden, n_actions)
         )
 
-    def forward(self, obs):            # obs: (..., 79) → logits: (..., 23)
+    def forward(self, obs):            # obs: (..., 83) → logits: (..., 27)
         return self.net(obs)
 ```
 
@@ -81,7 +83,7 @@ class MemorylessActor(nn.Module):
 
 ```python
 class RecurrentActor(nn.Module):
-    def __init__(self, obs_dim=79, n_actions=23, hidden=256):
+    def __init__(self, obs_dim=83, n_actions=27, hidden=256):
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Linear(obs_dim, hidden), nn.ReLU()
@@ -90,10 +92,10 @@ class RecurrentActor(nn.Module):
         self.head = nn.Linear(hidden, n_actions)
 
     def forward(self, obs, h=None):
-        # obs: (batch, seq, 79) or (batch, 1, 79) at inference
+        # obs: (batch, seq, 83) or (batch, 1, 83) at inference
         enc = self.encoder(obs)         # (batch, seq, hidden)
         out, h_new = self.gru(enc, h)   # out: (batch, seq, hidden), h_new: (1, batch, hidden)
-        logits = self.head(out)         # (batch, seq, 23)
+        logits = self.head(out)         # (batch, seq, 27)
         return logits, h_new
 ```
 
@@ -115,7 +117,7 @@ class Critic(nn.Module):
 
 ### 2.4 Belief-Augmented Actor
 
-Same as `MemorylessActor` but `obs_dim = 79 + 5 = 84`. Prepend the belief vector to `obs` before calling.
+Planned only, not built: the same as `MemorylessActor` with a belief vector over the 5 formations appended to `obs`.
 
 ---
 
@@ -134,8 +136,8 @@ Store these per step, per player:
 
 | Field | Shape per step | Notes |
 |---|---|---|
-| `obs_vec` | `(5, 79)` | Observation for each player |
-| `mask` | `(5, 23)` | Action mask |
+| `obs_vec` | `(5, 83)` | Observation for each player |
+| `mask` | `(5, 27)` | Action mask |
 | `action` | `(5,)` | int action taken |
 | `log_prob` | `(5,)` | log π(a|o) |
 | `value` | `(5,)` | critic estimate (same global state for all) |
@@ -164,8 +166,8 @@ def make_sequence_batch(buffer, seq_len=32):
 
 ```python
 # Forward pass for a sequence batch:
-logits, h = actor(obs_batch, h0)          # obs_batch: (B, seq_len, 79)
-# logits: (B, seq_len, 23)
+logits, h = actor(obs_batch, h0)          # obs_batch: (B, seq_len, 83)
+# logits: (B, seq_len, 27)
 # Do NOT backprop through h across sequence boundaries (detach h0)
 h0 = h0.detach()
 ```
@@ -254,7 +256,7 @@ class MaskedCategorical:
 | `total_steps` | 10M–50M | Total environment steps |
 | `shaping_anneal_end` | 5M steps | Steps at which `lambda_t → 0` |
 
-These are the defaults of `training/train.py`, and each is a flag there. They are starting points. Tune during the first easy-setting runs (one formation, full vision).
+These are the defaults of `training/train.py`, and each is a flag there. The study ran every team with `--n-envs 48 --batch-size 1024 --matches 40000 --eval-every 1000 --eval-matches 50 --test-matches 300` and the other values of this table (each run's `result.json` has its exact arguments). They are starting points. Tune during the first easy-setting runs (one formation, full vision).
 
 ---
 
@@ -271,7 +273,7 @@ w = shaping_weight(total_steps_so_far)
 env.set_shaping_weight(w)
 ```
 
-The `shape_cap = 5.0` per episode hard-caps total shaping regardless of `lambda_t`.
+The weight multiplies only the small reward terms of `game.md`, Section 9, which together are capped at `reward.small_cap` (50 points per player per match by default). The potential-based shaping (`reward.potential`) is outside the weight and the cap and is never faded (`football/env.py`). In the Q1-Q3 study every small term is off and the potential-based shaping is the only shaping, so this anneal changed nothing there: the study's teams were trained with goals plus potential-based shaping for the whole run.
 
 With the easy start (Section 7) the trainer does not start this anneal at step 0. The weight stays at 1.0 while the opponent is still weakened, and the anneal over `--shaping-anneal-end` steps starts at the step where the opponent first reaches full strength. The reason is a run in which the weight had fallen to 0.6 while the opponent was still 40% random: the attack faded (13 shots a match down to 4). Two runs restarted from the same checkpoint with the weight held at 1.0 kept shooting 6 to 11 times a match.
 
@@ -336,23 +338,14 @@ Expected: trained policy clearly beats random (win rate > 80%) and approaches he
 - Check that shaping is being received (`reward_parts["shaping"]` should be positive)
 - Check that the critic is seeing global state (not per-player obs)
 
-### Stage 3: Q1 — Vision and Structure
+### Stages 3 to 5 (original plan, replaced)
 
-Config: all 5 formations, three vision radii (`12, 25, 40`), all structure levels (`zeta=0,1,2`).
-
-Run a separate training for each `(formation, radius, zeta)` combination. Each run: 5M steps.
-
-### Stage 4: Q2 — Formation Switching
-
-Config: `zeta=2`, `radius=25`, opponent switching modes: SCHEDULED, RANDOM, SCORE_REACTIVE.
-
-Use the recurrent actor (GRU). Compare all 4 agent variants (memoryless, recurrent, belief-augmented, oracle). Each run: 10M steps.
-
-### Stage 5: Q3 — Playmaker
-
-Config: `zeta=2`, `radius=25`, `sigma` = D slot / M slot / F slot (3 runs per agent variant).
-
-Use the recurrent actor. Each run: 10M steps.
+The plan was one run of 5M to 10M steps per setting, with structure level 2 and a belief-augmented actor for Q2 and Q3.
+What was run instead: every team is one run of 40,000 full matches (48M steps) with the easy start, against the
+opponent formations of its question; Q1 varies the structure level (0, 1, 2) at radii 12, 25 and full vision; Q2 trains
+end-to-end GRU and MLP teams on the switching opponent and compares them with a filter that hands over to a specialist;
+Q3 trains specialists against the playmaker and recurrent teams on all cases. Details: the report and
+`docs/reportQ1.md` to `reportQ3.md`.
 
 ---
 
@@ -361,6 +354,8 @@ Use the recurrent actor. Each run: 10M steps.
 `training/train.py` writes `runs/<name>/log.jsonl`. A `"kind": "train"` line after every update holds the losses, the entropy, `shaping_weight`, `opp_eps` and the mean over the training matches that finished in that update of: `win`, `draw`, `goal_diff`, `goals_for`, `shaping_return`, `passes`, `pass_completion`, `shots`, `possession`, `ball_own_third` / `ball_mid_third` / `ball_their_third`, `invalid_action_rate`, `opp_anchor_dist`. A `"kind": "eval"` line every `--eval-interval` steps (and a `"final"` line at the end) holds the same match fields plus `W`, from matches on fixed seeds against the opponent at full strength. `goal_diff_over_time` and the Q2 and Q3 metrics below are not written yet.
 
 Read the behaviour fields, not only the win rate. A team that is not attacking shows `shots` near 0 and `ball_their_third` under 0.1; a team that is hiding the ball shows high `possession` with `ball_own_third` above 0.5.
+
+The rest of this section is the logging plan written before the trainer. The Q2 and Q3 measures were in the end computed by `scripts/q2.py` and `scripts/q3.py`, not logged during training.
 
 Log these every `EVAL_INTERVAL = 100_000` training steps:
 
@@ -451,32 +446,18 @@ For GRU agents, maintain separate hidden states per environment and per player: 
 
 ## 10. Evaluation Protocol
 
-**Evaluation runs:** 100 matches per condition, separate from training environments.
+As run in the study:
 
-**Paired evaluation:** use the same 100 seeds for every agent variant within a condition, so comparisons are paired (reduces variance from environment randomness).
+- **During training:** every 1,000 matches, 50 matches on fixed seeds (10000+) against the full-strength opponent; a
+  checkpoint is saved each time.
+- **Test:** the best of these checkpoints plays 300 new matches on seeds no evaluation used (50000+). Its W is the
+  result of the run (`result.json`).
+- **Q2 and Q3:** every team plays the same matches (300 per test in Q2, seeds 60000+; 500 per case in Q3, seeds
+  70000+), so differences between teams are paired.
+- **Win score:** `W = (wins + 0.5 * draws) / n_matches`. Q1 reports the mean over 3-4 training seeds with a 95%
+  t-interval (Welch for differences); Q2 and Q3 report paired intervals over matches.
 
-```python
-EVAL_SEEDS = list(range(10_000, 10_100))  # fixed for all evaluations
-
-def evaluate(agent, cfg, n_matches=100):
-    results = []
-    for seed in EVAL_SEEDS[:n_matches]:
-        env = FootballEnv(cfg)
-        obs, _ = env.reset(seed=seed)
-        h = {i: torch.zeros(1, 1, 256) for i in range(5)}  # if GRU
-        while not env.done:
-            actions = {}
-            for i in range(5):
-                logit, h[i] = agent.actor(torch.tensor(obs["vec"][i]), h[i])
-                mask = torch.BoolTensor(obs["mask"][i])
-                logit[~mask] = float("-inf")
-                actions[i] = Categorical(logits=logit).sample().item()
-            obs, _, _, info = env.step(actions)
-        results.append({"score": info["final_score"], "stats": env.stats})
-    return results
-```
-
-**Win score:** `W = (wins + 0.5 * draws) / n_matches`. Report `mean ± std` over 5 training seeds.
+(The original plan was 100 evaluation matches per condition and mean ± std over 5 training seeds.)
 
 ---
 

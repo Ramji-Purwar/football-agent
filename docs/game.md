@@ -1,6 +1,8 @@
 # game.md: The 5-a-Side Football Game and the Learning Agent
 
-This document explains the whole project in detail: what the game is, how every mechanic works, what the learning agent sees and does, what we vary in experiments, and what we measure. Read this first. The companion file `opponent.md` covers the rule-based opponent team. See `codebase.md` for the code map and `training.md` for the training protocol.
+This document explains the whole project in detail: what the game is, how every mechanic works, what the learning agent sees and does, what we vary in experiments, and what we measure. The companion file `opponent.md` covers the rule-based opponent team, `training.md` the trainer, and the repository README the code map.
+
+**Status.** This is the design specification of the game, written before and during development. Sections 2 to 10 describe the game and the code with all their options. Sections 11 to 14 were the original experiment plan; what was actually run, and every change from the plan, is in the final report (`paper/`) and in `docs/reportQ1.md` to `reportQ3.md`. The settings of the study are in `football_adapt/configs/study.yaml`.
 
 **Parameter status:** all numeric constants are now filled in from `configs/default.yaml`. The source of truth is always the config file; this document reflects the current calibrated defaults.
 
@@ -260,7 +262,7 @@ Ball is clamped to the pitch. No throw-ins or corners. Only a ball that crosses 
 
 ### 8.7 Kickoff
 
-After a goal, all players return to their formation anchors. The team that **conceded** starts with the ball (given to the first forward by slot index). Team that scored, kicks off too — wait, actually: the team that **conceded** gets the ball (standard football rule). The ball is placed at the kickoff player's position.
+After a goal, all players return to their formation anchors. The team that **conceded** starts with the ball, given to its first forward by slot index (the standard football rule). The ball is placed at the kickoff player's position.
 
 ### 8.8 One Step of the Game Loop (exact order)
 
@@ -281,35 +283,39 @@ After a goal, all players return to their formation anchors. The team that **con
 
 ## 9. Rewards
 
-The reward is judged over the **whole match**: the trainer does not discount (`--gamma 1`, its default), so every choice is judged by everything that follows it until the final whistle, including the result. Every value is written in **points**; the game hands the trainer points × `reward.scale` (0.001). Only the ratios between terms matter to the learning.
+**The reward of the Q1-Q3 study** (`configs/study.yaml`) is goals (+100 / -100, the whole team) plus the potential-based shaping described below (`ball` 10, `chance` 30), with every other term of this section off. The trainer discounts with `gamma` = 0.99 (its default). The potential-based shaping is kept for the whole run.
 
-**The result and the goals** go to the whole team and count for most. **Every other term is small**: per player, all of them together stay within ±`small_cap` = 50 points over a match. So any win (at least +1000 + 100 - 50) beats any draw (at most +50), and any draw beats any loss. "Own" terms go to the player who earned them (`per_player`, on by default); the others go to every player.
+The rest of this section lists every reward term the game offers, as in `configs/default.yaml`; they were used during development. Every value is written in **points**; the game hands the trainer points × `reward.scale` (0.001). Only the ratios between terms matter to the learning.
+
+**The result and the goals** go to the whole team and count for most. **Every other term is small**: per player, all of them together stay within ±`small_cap` = 50 points over a match. (The end-of-match term `eta` is 0 in the defaults, so the goals make the result.) "Own" terms go to the player who earned them (`per_player`, on by default); the others go to every player.
 
 | Term | Points | Who | Meaning |
 |---|---|---|---|
 | `eta` | 0 (was +1000 / 0 / -1000) | team | End of match: win / draw / loss. Off: the goals already make the goal difference |
 | `goal` | +100 / -100 | team | We score / they score |
 | **Passing** | | | |
-| `w_pass_done` | +0.5 | own (passer) | A completed pass in any direction; only the first `pass_count_cap` = 30 of the match |
-| `w_pass_accuracy` | +5 × above the bar | team | End of match: how far the share of our passes completed is above `accuracy_bar` = 90% (0 at 90%, all 5 at 100%), in full from `accuracy_min` = 10 passes. Small on purpose: the pass test offers only safe passes, so every team completes about 95% of its passes, a random one too (measured: 14.4 points a random team, 14.3 the scripted team, at 15 × the plain share) |
-| `w_receive` | +0.5 | own (receiver) | Receiving a completed pass that went `receive_gain` = 5 m or more forward |
+| `w_pass_done` | +4 | own (passer) | A completed pass in any direction; only the first `pass_count_cap` = 30 of the match |
+| `w_pass_accuracy` | 0 (off) | team | End of match: how far the share of our passes completed is above `accuracy_bar` = 90% (0 at 90%, all 5 at 100%), in full from `accuracy_min` = 10 passes. Small on purpose: the pass test offers only safe passes, so every team completes about 95% of its passes, a random one too (measured: 14.4 points a random team, 14.3 the scripted team, at 15 × the plain share) |
+| `w_receive` | 0 (off) | own (receiver) | Receiving a completed pass that went `receive_gain` = 5 m or more forward |
 | `w_free` | 0 (off) | own | Every step we have the ball and the carrier has an open pass to him, by how much that pass would help (0 for one back or sideways); at most `free_cap` = 10 a match. Off: at 0.02 a team that kept the ball deep earned the most of it (1.2 a player, the scripted team 0.2); `w_receive` pays being free when the pass is played |
-| `w_turnover` | -2 | own | He lost the ball: tackled, his pass cut out, or his pass left loose and picked up by them |
+| `w_turnover` | -8 | own | He lost the ball: tackled, his pass cut out, or his pass left loose and picked up by them |
 | **Attack** | | | |
 | `w_progress` | +0.05 per m | team | The ball moves toward their goal while we keep it (back = minus); one pass counts at most `progress_pass_cap` = 20 m |
 | `w_chance` | +10 × change | team | The change of our carrier's chance to score if he shot now (0 to 1), while we keep the ball |
-| `w_shot` | +5 × chance | own (shooter) | A shot, by its chance of scoring |
-| `w_big_chance` | +10 | own (shooter) | A shot at a chance of `big_chance` = 0.3 or better |
-| `w_poor_shot` | -5 | own (shooter) | A shot that is not the best he can do (`shot_rule`, below) |
-| `w_missed_shot` | -5 | own | The ball tackled off him within `missed_steps` = 5 steps of a moment he had the shot on (a defender within 6 m, a chance of 0.15 or more) |
+| `w_shot` | +10 × chance | own (shooter) | A shot, by its chance of scoring |
+| `w_big_chance` | +16 | own (shooter) | A shot at a chance of `big_chance` = 0.3 or better |
+| `w_poor_shot` | -8 | own (shooter) | A shot that is not the best he can do (`shot_rule`, below) |
+| `w_missed_shot` | 0 (off) | own | The ball tackled off him within `missed_steps` = 5 steps of a moment he had the shot on (a defender within 6 m, a chance of 0.15 or more) |
 | **Defence** | | | |
 | `w_chance_against` | -10 × change | team | The mirror of `w_chance`: the change of *their* carrier's chance to score on our goal while they keep the ball (a fall gives it back) |
 | `w_shot_against` | -5 × chance | team | A shot of theirs, by its chance |
 | `w_tackle` | +2 × zone | own (tackler) | He tackled the ball off them |
 | `w_interception` | +3 × zone | own (interceptor) | He cut out their pass |
 | `win_zone` | 1.0 | | Winning the ball pays × (1 + `win_zone` × how far up the pitch, 0 at our goal line, 1 at theirs): up to double near their goal |
-| `w_open_lanes` | -0.2 per lane per step × danger | own | Every step they have the ball, for each pass their carrier has open (none of ours would get to it), by how dangerous it is (usefulness to them: 0 for a pass back), to the player of ours nearest that lane; not the one nearest the ball, who goes for it |
+| `w_open_lanes` | 0 (off) | own | Every step they have the ball, for each pass their carrier has open (none of ours would get to it), by how dangerous it is (usefulness to them: 0 for a pass back), to the player of ours nearest that lane; not the one nearest the ball, who goes for it |
 | **Positions** | | | |
+| `w_assist` | +10 × chance | own (passer) | His pass was followed by a shot of the receiver within `assist_steps` = 30 steps, by the shot's chance |
+| `w_hold` | -0.05 per step | own | Holding the ball longer than `hold_free` = 20 steps |
 | `w_formation` | +0.01 per step × fit | own | How well he stands on his `HOLD_SHAPE` spot (Section 7): his support run while we have the ball, his place without it. Fit is `exp(-(d / formation_dist)^2)`, `formation_dist` = 15 m: 1 on the spot, 0.37 at 15 m. The player nearest the ball is not counted. Needs `actions.shape_guide` |
 
 **Usefulness of a pass** (`usefulness`): the metres it gains toward the goal over `gain` = 20, or the rise in the chance to score over `chance` = 0.3, whichever is larger, from 0 to 1. A pass back or sideways that does not raise the chance is worth 0. It weights `w_free` (so standing free somewhere useless earns nothing) and `w_open_lanes` (so cutting a lane that matters counts, not any lane).
@@ -324,7 +330,7 @@ With `per_player` off, all five players receive the same reward.
 
 **Progress** (`w_progress`): on every step where our team holds the ball, the reward is `w_progress` times the metres the ball has moved toward the opponent's goal since we were last paid. Carrying the ball forward is paid step by step, a pass is paid in one go when a teammate has it, and moving back costs the same amount, so going back and forth earns nothing. Nothing is paid across a goal, a kickoff or a lost ball. Carrying the ball the whole pitch is worth 0.2, a fifth of a goal. One pass is paid for at most `progress_pass_cap` = 20 m, so three 20 m passes up the pitch earn three times what one 60 m ball earns: a team that had learned to score only from long balls to a forward waiting by the goal gets a reason to build up as well. The long ball is still allowed and still scores. Without this term a new policy never reaches the shooting zone (a random policy takes no shot at all in 20 matches), so it never sees a shot or a goal and has nothing to learn attacking from.
 
-**Potential-based shaping** (`reward.potential`, `football/env.py` `potential`; the reward of the Q1-Q3 study, `configs/study.yaml`). Every step each player of ours gets `gamma` x Phi(after) - Phi(before), where Phi = `ball` x where the ball is (-1 at our goal line, +1 at theirs, whoever has it) + `chance` x the carrier's chance to score if he shot now (ours +, theirs -, nothing while the ball is loose or in flight), and Phi is 0 after the final whistle. The study uses `ball` 10 and `chance` 30 points, with goals +-100 and every other term off. Shaping of this form does not change which play is best (Ng, Harada & Russell 1999; for several learners Devlin & Kudenko 2011), so it is never faded or capped, and it cannot be farmed: with `gamma` 1 it adds up to nothing over a match whatever the team does (`tests/test_smoke.py`). A lost ball gives back what the possession earned, and their chance rising costs what ours rising pays. `gamma` must be the trainer's discount: `training/train.py` sets it. Off by default (`ball` 0, `chance` 0).
+**Potential-based shaping** (`reward.potential`, `football/env.py` `potential`; the reward of the Q1-Q3 study, `configs/study.yaml`). Every step each player of ours gets `gamma` x Phi(after) - Phi(before), where Phi = `ball` x where the ball is (-1 at our goal line, +1 at theirs, whoever has it) + `chance` x the carrier's chance to score if he shot now (ours +, theirs -, nothing while the ball is loose or in flight), and Phi is 0 after the final whistle. The study uses `ball` 10 and `chance` 30 points, with goals +-100 and every other term off. Shaping of this form does not change which play is best (Ng, Harada & Russell 1999; for several learners Devlin & Kudenko 2011), so it is never faded or capped (it is outside the trainer's shaping weight, `football/env.py`), and it cannot be farmed: with `gamma` 1 it adds up to nothing over a match whatever the team does (`tests/test_smoke.py`). A lost ball gives back what the possession earned, and their chance rising costs what ours rising pays. `gamma` must be the trainer's discount: `training/train.py` sets it. Off by default (`ball` 0, `chance` 0).
 
 **Chance** (`w_chance`, `football/env.py` `attack_value`) pays for **making a chance**. While one of ours has the ball, the game works out the chance he would score if he shot now (the formula of Section 8.5, every opponent counted, seen or not; 0 out of range), and the team is paid `w_chance` times every change of it. Across our pass in flight it is kept, so a pass is paid in one go when a teammate has it. A possession therefore earns how much better a chance it made; a pass back loses what the pass forward earned, so passing back and forth earns nothing. Nothing is paid when the ball is won, lost (`w_turnover`), shot (`w_shot`) or scored. Off by default; with it off the game and its rewards are unchanged.
 
@@ -340,7 +346,7 @@ This has already happened once. With a bonus of 2 points for every completed pas
 
 Each player gets its own observation vector and action mask. Positions are **relative to the player** (team frame).
 
-**Flat observation vector** (total **79 features** with D=8, 5 formations):
+**Flat observation vector** (total **83 features** with D=8, 5 formations and through balls):
 
 | Block | Content | Size |
 |---|---|---|
@@ -355,19 +361,18 @@ Each player gets its own observation vector and action mask. Positions are **rel
 | Opponents (5) | (dx, dy) relative + visibility flag (zeros if not visible) | 15 |
 | Ball | (dx, dy) relative + visibility flag (always 1 with `vision.ball_always`) | 3 |
 | Match info | possession one-hot (OWN/OTHER/LOOSE), score diff clipped/3, t/T | 5 |
-| **Total** | | **79** |
+| **Total** | | **83** |
 
 **Global state** (for centralized critic, 51 features):
 All 10 positions (normalized), ball position, holder one-hot (11 options including None), 2× formation one-hot (5), sigma one-hot (6), score diff, t/T.
 
-**Extra inputs for comparison variants** (appended to the observation):
-- Belief-augmented: belief vector `b` over 5 formations (5 floats)
-- Oracle Q2: true opponent formation as one-hot (5 floats)
-- Oracle Q3: playmaker index as one-hot (6 floats, 0 = none)
+**Extra input used in the study:** with `actions.show_playmaker` (Q3's `mix_told` team) the observation also says which opponent is the playmaker (one-hot over none and players 1-5, 6 floats). The belief-augmented and oracle inputs of the original plan were not built: Q2 and Q3 use filters and team handovers instead (`scripts/q2.py`, `scripts/q3.py`).
 
 ---
 
-## 11. Experiment Conditions
+## 11. Experiment Conditions (original plan)
+
+What was run: structure levels 0, 1, 2 at radii 12, 25 and full vision (120 m) in Q1; zeta 0 at 25 m and zeta 1 at 12 m in Q2; zeta 0 at 25 m in Q3; 3-4 seeds per Q1 setting; 300 test matches per team (500 per case in Q3). The table is the plan made before the study.
 
 | Knob | Values |
 |---|---|
@@ -398,7 +403,9 @@ Every run must be reproducible from a **config file + seed**. Log the config wit
 
 See `training.md` for hyperparameters and the training protocol.
 
-### 12.2 Actor Variants
+### 12.2 Actor Variants (original plan)
+
+Used in the study: the memoryless MLP (all of Q1, the specialists, the Q2 MLP teams) and the recurrent GRU (the Q2 GRU teams and the Q3 mix teams). The belief-augmented and oracle networks were not built; the Q2 and Q3 oracles are a hand-over to a specialist team.
 
 | Variant | Architecture | Used for |
 |---|---|---|
@@ -410,7 +417,7 @@ See `training.md` for hyperparameters and the training protocol.
 
 **Training the GRU:** train on sequences (chunks of consecutive steps). Reset hidden state at episode start. Maintain per-player hidden states throughout a sequence.
 
-### 12.3 The Bayesian Belief Filter (non-learning baseline for Q2)
+### 12.3 The Bayesian Belief Filter (non-learning baseline for Q2; original plan, see the end of this section)
 
 Each player maintains a probability distribution `b_i(g)` over the 5 opponent formations:
 
@@ -424,7 +431,7 @@ update:   b(g)  ∝ b~(g) * ∏_{j visible} Normal( y_j ; anchor_g(j), S_NOISE²
 - Only visible opponent players contribute to the update
 - Inferred formation = argmax of `b`
 
-See `agents.md` for the implementation reference.
+This Gaussian filter was the original plan. The filter used in Q2 (`agents/belief_filter.py`) instead counts, on practice matches, how often each opponent player stands in each 10 m box under each formation, raises each step's likelihood to a power β < 1, and was tuned to β = 0.1, H = 0.0001 (`runs/q2/guess/r25/filter.json`). The Q3 filter (`agents/playmaker_filter.py`) works the same way on each opponent's distance from the ball.
 
 ### 12.4 Probes (measuring what the network learned)
 
@@ -434,7 +441,7 @@ A **probe** is a small classifier trained on the recurrent policy's hidden state
 
 Train probes after the policy is trained, using ground truth from `info["g"]` and `info["sigma"]`.
 
-### 12.5 Training Curriculum
+### 12.5 Training Curriculum (original plan; the easy start that was used is in `training.md`, Section 7)
 
 1. **Sanity:** random policy must lose clearly. Check reward wiring.
 2. **Easy:** one formation, full vision, no switching, no playmaker.
@@ -443,9 +450,9 @@ Train probes after the policy is trained, using ground truth from `info["g"]` an
 
 ---
 
-## 13. What We Measure
+## 13. What We Measure (original plan)
 
-See `experiments.md` for the full evaluation protocol. Key metrics:
+The evaluation protocol that was used is in the report and in `docs/reportQ1.md` to `reportQ3.md`. Key metrics:
 
 | Metric | Question |
 |---|---|
@@ -461,11 +468,11 @@ See `experiments.md` for the full evaluation protocol. Key metrics:
 | Shadow rate | Q3 |
 | Behaviour stats (possession, pass completion, shots, spread, share of time the ball is in each third) | All |
 
-Report mean ± std over 5 training seeds with **paired evaluation** seeds.
+Planned: mean ± std over 5 training seeds. Done: mean with a 95% interval over 3-4 seeds in Q1, and paired comparisons over the same matches in Q2 and Q3.
 
 ---
 
-## 14. Phase 0 Checks
+## 14. Phase 0 Checks (the results on the final game are in `football_adapt/runs/phase0/phase0.txt`)
 
 Run these before any training. All must pass.
 
@@ -531,23 +538,23 @@ reward:                 # points (Section 9; the full list with comments is in c
   goal: 100.0
   small_cap: 50.0
   per_player: true
-  w_pass_done: 0.5
-  w_pass_accuracy: 5.0
-  w_receive: 0.5
+  w_pass_done: 4.0
+  w_pass_accuracy: 0.0
+  w_receive: 0.0
   w_free: 0.0
-  w_turnover: -2.0
+  w_turnover: -8.0
   w_progress: 0.05
   w_chance: 10.0
-  w_shot: 5.0
-  w_big_chance: 10.0
-  w_poor_shot: -5.0
-  w_missed_shot: -5.0
+  w_shot: 10.0
+  w_big_chance: 16.0
+  w_poor_shot: -8.0
+  w_missed_shot: 0.0
   w_chance_against: -10.0
   w_shot_against: -5.0
   w_tackle: 2.0
   w_interception: 3.0
   win_zone: 1.0
-  w_open_lanes: -0.2
+  w_open_lanes: 0.0
   w_formation: 0.01
 
 formations:
@@ -558,18 +565,13 @@ opponent:
   zone:   {r_zone: 12.0, omega: 0.4, eps_arrive: 1.0, transition_max: 60}
   switching: {mode: NONE, dwell_min: 150}
   attack:  {shoot_min: 0.3, w_fwd: 2.0, w_open: 0.5, w_dist: 0.3,
-            pass_min: 0.3, d_danger: 6.0, hub_bonus: 0.3, open_max: 15.0}
-  support: {adv: 8.0, mid: 6.0, def: 3.0, r_support: 10.0}
+            pass_min: 0.3, d_danger: 6.0, hub_bonus: 1.0, open_max: 15.0}
+  support: {adv: 4.0, mid: 6.0, def: 1.0, r_support: 10.0}
   randomness: {eps_opp: 0.0}
-  playmaker: {sigma: 0}
+  playmaker: {sigma: 0, pass_speed: 1.0, free_role: true, control: 4.0}
 ```
 
-**Belief filter parameters** (still TBD; set before Q2 experiments):
-
-| Parameter | Meaning | Suggested starting point |
-|---|---|---|
-| `H` | Per-step switch probability | 0.001–0.01 |
-| `S_NOISE` | Opponent anchor noise | 3–8 m |
+**Filter parameters used in the study:** Q2 formation filter β = 0.1, H = 0.0001, m = 1 (`runs/q2/guess/r25/filter.json`, the same at radius 12); Q3 playmaker filter β = 0.05, commit at probability 0.95 (`docs/reportQ3.md`, Section 2.4).
 
 ---
 
@@ -581,8 +583,8 @@ opponent:
 | Slot | A position in a formation (D, M, or F) with a 0-based player index |
 | Structure level `zeta` | How much formation structure our agent gets (0, 1, 2) |
 | Control rating | Effectiveness multiplier that drops as a player strays from anchor |
-| Vision radius | How far a player can see opponents and the ball |
-| Playmaker | Opponent player with full-pitch vision |
+| Vision radius | How far a player can see opponents (the ball and teammates are always seen) |
+| Playmaker | Opponent player with full-pitch vision, a free role and control rating 4 (`opponent.md`, Section 10) |
 | Oracle | Agent given hidden information; upper bound only |
 | Belief | Probability distribution over opponent formations |
 | Probe | Small classifier read off the network's hidden state |

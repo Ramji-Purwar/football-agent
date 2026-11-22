@@ -12,7 +12,7 @@ compared match by match. 500 matches per case, seeds 70000+, never used in train
 | Does the playmaker cost the unaware team? | **Yes, a lot.** Whichever midfielder he is, v4 (the best Q1 team) goes from W 0.82–0.90 to 0.02–0.41: a cost E of 0.46–0.80 W, 6–10 goals of goal difference a match. |
 | Can our team tell who he is? | **Usually, but not quickly.** From where the opponents stand relative to the ball, the guess names the right player in 99–100% of matches in three of the four cases, after 140–195 of 1,200 steps (median). With 1-3-1 and player 4 it is right in only 68%. Matches without a playmaker are the weak point: in 13–38% the guess wrongly names someone. |
 | How much of the cost does the adaptive team win back, against the unaware team and the oracle? | **Part of it, always less than the oracle.** The oracle (specialist from the kick-off) wins back κ 0.12–0.81 of the cost; the identify-then-act team 0.02–0.47. Regret against the oracle 0.08–0.20 W. |
-| Does one team for every case do better (§3.7)? | **Yes, against the playmaker, once it is started from a team that can play.** Over the 7 playmaker cases the single recurrent team mix averages W 0.70, against 0.35 for identify-then-act and 0.42 for the oracle of specialists. Without a playmaker it is worse than v4 (0.72 against 0.86). From scratch it did not learn at all. |
+| Does one team for every case do better (§3.7)? | **Yes, against the playmaker, once it is started from a team that can play.** Over the 7 playmaker cases the single recurrent team mix averages W 0.70, against 0.35 for identify-then-act and 0.42 for the oracle of specialists. Without a playmaker it is worse than v4 (0.72 against 0.85). From scratch it did not learn at all. |
 
 Other findings:
 
@@ -100,7 +100,7 @@ filter only knows the opponent numbers, not their formation.
 | one specialist per playmaker number (5) | **2** (players 2 and 4) | only midfielders are playmakers; the player 3 specialist failed (test W 0.25), so players 2 and 4 were kept |
 | guess from long passes and interceptions from afar | from positions relative to the ball | his passes are no longer faster, and positions carry the evidence |
 | small and large `r` | **radius 25 only** | v4 is the unaware team; the "more at small r" part of the hypothesis is not tested |
-| team 4: no-shadow ablation | **run** as `mixw_ns` (one recurrent team without SHADOW, warm-started) | from scratch the mixture teams did not learn; see the AUTO tables and the paper, Section 4.6 |
+| team 4: no-shadow ablation | **run** as `mixw_ns` (one recurrent team without SHADOW, warm-started) | from scratch the mixture teams did not learn; see the AUTO tables and the paper, Section 5.3 |
 | team 5: one recurrent policy over all cases | **run** as `mixw` (and `mixw_told`, told who the playmaker is), warm-started from the Q2 GRU seed 0 | same reason; the warm start is stated wherever these teams are compared |
 
 ## 3. Results
@@ -206,7 +206,7 @@ Both teams use SHADOW about as much, and on the playmaker about as often (an opp
 Even with every match against the same playmaker, the specialists did not learn to mark him. Whatever they do
 differently, it is not man-marking. Finding out how they win was not part of this work. So the "neutralize" in Q3 is
 measured (W won back), but **not by the mechanism the plan expected**. The no-shadow ablation was run later
-on the recurrent mixture team (`mixw_ns`); it scored higher than the team with SHADOW (paper, Section 4.6).
+on the recurrent mixture team (`mixw_ns`); it scored higher than the team with SHADOW (paper, Section 5.3).
 
 ### 3.6 The specialists' training
 
@@ -216,7 +216,7 @@ on the recurrent mixture team (`mixw_ns`); it scored higher than the team with S
 | player 4 (3 formations) | **0.43** | 0.00, 0.03, 0.02, 0.05, 0.03, 0.18, 0.16, 0.19, 0.25, 0.33 | 9% |
 | player 3 (3 formations) | **0.25** | 0.01, 0.08, 0.14, 0.18, 0.28, 0.25, 0.20, 0.23, 0.29, 0.36 | 8% |
 
-The easy start lowers the opponent's randomness only while we win 60% of evaluation matches. The player 3 and 4
+The easy start lowers the opponent's randomness only while we win 60% of the training matches (checked every 50). The player 3 and 4
 specialists rarely reached the full-strength opponent and spent the second half against randomness 0.05. Both were
 still improving at 40,000 matches. The player 2 specialist, with one formation to learn, got there by 24,000 matches.
 
@@ -314,10 +314,14 @@ of the SHADOW action. The verdict lines with intervals are in `docs/results_fina
 - The team without SHADOW scores higher than mix (-0.15 W, 95% interval ±0.01, paired over the same matches).
 <!-- /AUTO:q3_concl -->
 
+   These differences are over all 11 cases, with and without a playmaker. Over the 7 playmaker cases only (as in the
+   paper), mix leads adaptive by +0.35 ± 0.02 and the oracle by +0.28 ± 0.02, and being told adds +0.05 ± 0.02
+   (`paper/numbers.txt`).
+
    How far these go: the intervals above are over the 500 matches per case, with one training run per team. They show
    that *these* teams differ, not that every training run would. mix_told's gain (+0.02) is small enough to be a
    difference between runs. The team without SHADOW is better than mix in every case, including the cases without a
-   playmaker (0.86 against 0.72), and its own training run also ended higher (test W 0.85 against 0.71). So the
+   playmaker (0.85 against 0.72), and its own training run also ended higher (test W 0.85 against 0.71). So the
    result is that SHADOW is **not needed**, in line with conclusion 6, rather than that SHADOW hurts.
 
 ## 5. Limitations

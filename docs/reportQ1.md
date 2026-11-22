@@ -27,10 +27,10 @@ The benefit of structure, test W difference with a 95% interval over seeds *(gen
 
 Other findings:
 
-- **25 m is the best radius.** The two structure levels average 0.76 and 0.82 at 25 m against 0.45 and 0.61 at 12 m. Full vision does not help and is no better than 25 m.
+- **25 m has the best means.** The two structure levels average 0.76 and 0.82 at 25 m against 0.45 and 0.61 at 12 m. Full vision is not measurably better than 25 m (the seed spread is too large for a tested difference between radii).
 - **Seeds disagree because runs find different styles.** The good runs defend deep and counter-attack with fast passes; the bad ones drift into keeping the ball (§4.4). Across the first 16 runs, more possession goes with lower W (correlation −0.51).
 - **The learned teams cope with limited vision much better than the hand-written team.** At 12 m the scripted team in our seat gets W 0.07; the learned teams average 0.45–0.61.
-- **Every team has overfitted to the four opponent formations it trained against.** Against the never-seen 1-2-2 almost all score W 0.01–0.12.
+- **Every team has overfitted to the four opponent formations it trained against.** Against the never-seen 1-2-2, 30 of the 33 structure runs score W 0.00–0.09 and 32 of them at most 0.21 (one run reaches 0.87).
 
 ![Test W by radius and structure](img/final/q1_w_by_radius.png)
 
@@ -43,7 +43,7 @@ Other findings:
 | **ζ 0** (no formation) | seeds 0, 42, 7, 11 | 0, 42, 7, 11 | 0, 42, 7, 11 |
 | **ζ 1** (formation spot + HOLD_SHAPE) | 0, 42, 7, 11 | 0, 42, 7, 11 | 0, 42, 7, 11 |
 | **ζ 2** (ζ 1 + control penalty) | 0, 7, 11 | 0, 7, 11 | 0, 7, 11 |
-| ζ 1 with our formation 1-3-1 / 1-2-2 | 0 | 0 | 0 |
+| ζ 1 with our formation 1-3-1 / 1-2-2 | 0, 42, 7, 11 (both) | 0, 7 (1-3-1); 0 (1-2-2) | 0 (both) |
 
 40,000 training matches each. Seeds 0 and 42 were run first. Seeds 7 and 11 were added for every setting once it was
 clear that seeds disagree by more than settings do. The generated tables list exactly which runs finished.
@@ -58,8 +58,8 @@ clear that seeds disagree by more than settings do. The generated tables list ex
 | zeta 0 | no formation spot in the observation and no HOLD_SHAPE. Off the ball a player has the 8 walking moves, STAY, GO_TO_BALL, TACKLE and SHADOW |
 | zeta 1 | zeta 0 plus the player's formation spot in the observation (the spot moves with the attacking/defending shape) and the HOLD_SHAPE move (walk to the spot). No penalty for leaving the spot |
 | zeta 2 | zeta 1 plus the control rating: tackle, pass and shot success drop with the player's distance from his formation spot, so the formation is enforced |
-| Opponent | the scripted zonal team, formation drawn per match from 2-2-1, 2-1-2, 1-3-1, 3-1-1. 1-2-2 was left out on purpose: it is much the strongest formation (the scripted 2-2-1 gets W ≈ 0.1 against it) |
-| Reward | goals ±100 for the whole team, plus potential-based shaping Φ = 10 × ball position (−1 at our goal line, +1 at theirs) + 30 × the ball carrier's chance to score (+ ours, − theirs). Potential-based shaping does not change which policy is best |
+| Opponent | the scripted zonal team, formation drawn per match from 2-2-1, 2-1-2, 1-3-1, 3-1-1. 1-2-2 was left out on purpose, to be the Q2 target: in Phase 0 it is the strongest formation in the worst case (its lowest W is 0.51; the scripted 2-2-1 gets W 0.30 against it, as against 1-3-1) |
+| Reward | goals ±100 for the whole team, plus potential-based shaping Φ = 10 × ball position (−1 at our goal line, +1 at theirs) + 30 × the ball carrier's chance to score (+ ours, − theirs). Potential-based shaping does not change which policy is best, so it is kept for the whole run (never faded) |
 | Learning | PPO, γ = 0.99, λ = 0.95, value normalization, clip 0.2, 5 epochs, minibatch 1,024, learning rate 3e-4 (actor) / 1e-3 (critic), entropy 0.01, 48 games in parallel |
 | Easy start | at first each opponent player acts at random half of the time. The randomness drops by 0.05 whenever we win 60% of 50 matches (rises when we win 40% or less). It first reached 0 after 9,000–30,000 matches. Runs that could not keep beating the full-strength opponent kept training against a slightly weakened one (randomness 0.05) |
 | Evaluation | every 1,000 matches: 50 matches against the full-strength opponent on fixed seeds; a checkpoint is saved each time |
@@ -77,7 +77,7 @@ clear that seeds disagree by more than settings do. The generated tables list ex
 | 3 formations of ours | **2-2-1** at every structure level; **1-3-1 and 1-2-2 at ζ 1, one seed each; later 4 seeds each at 12 m and 2 for 1-3-1 at 25 m** | compute; 1-3-1 is the best formation on average in Phase 0, 1-2-2 the maximin |
 | 3 radii + full vision | **12, 25, full** | compute |
 | 3 seeds (5 on headline settings) | **4 seeds** (ζ 0, ζ 1), **3** (ζ 2), 1 (other formations) | |
-| opponent formation random over all 5 | **4 formations** (no 1-2-2) | 1-2-2 is far stronger; held out as the Q2 target |
+| opponent formation random over all 5 | **4 formations** (no 1-2-2) | kept unseen as the Q2 target (strongest formation in the worst case in Phase 0) |
 
 ## 3. Results
 
@@ -294,8 +294,8 @@ The setting does not decide the style, the run does. The two failed runs at 12 m
 2. **The worst run is better with the formation at limited vision, but the spread is not.** The worst ζ 1 seed beats the worst ζ 0 seed by 0.26 W at 12 m (0.44 against 0.18) and by 0.15 at 25 m (0.75 against 0.60). With full vision there is no such effect (0.41 against 0.40). Over all 12 runs a side the seed spread is the same with and without the formation (SD 0.17 and 0.18, Levene p 0.68), so this is an observation on single runs, not a tested effect. Runs without a formation more often settle into a possession style that limited vision cannot support (§4.4).
 3. **The hypothesis "structure helps more at small r" is not supported by the data**: the point estimates fit it (B about +0.16 at 12 m, +0.05 at 25 m and with full vision), but every interval includes 0 (§3.1).
 4. **The hypothesis "spread is larger at large r" is not supported.** Full-vision teams are the most compact (§4.3).
-5. **More vision is not always better.** 25 m is the best radius at both structure levels.
-6. **Seed variance is a result in itself.** One setting can give test W anywhere from about 0.2 to 0.9, so claims about structure need several seeds. A comparison with one seed per setting would have shown a clean +0.37 benefit at 12 m (seed 0 alone).
+5. **More vision is not always better.** 25 m has the best mean at both structure levels (not a tested difference: the seed spread is too large).
+6. **Seed variance is a result in itself.** One setting can give test W anywhere from about 0.2 to 0.9, so claims about structure need several seeds. A comparison with one seed per setting would have shown a clean +0.43 benefit at 12 m (seed 0 alone: 0.60 against 0.18).
 7. **All teams overfit to the four training formations.**
 8. <!-- AUTO:q1_z2_concl -->
 **Enforcing the formation (ζ 2) on top of the spot** changes test W against ζ 0 by +0.07 ± 0.43 at 12 m, -0.22 ± 0.35 at 25 m, -0.20 ± 0.34 at full (120 m) (3 ζ 2 seeds against 4 ζ 0 seeds). No interval excludes 0: the control penalty does not change the result by more than the seeds do.
@@ -316,7 +316,7 @@ The generated blocks in §3.1 and §3.4 add ζ 2 (the enforced formation) and ou
 | What | Where |
 |---|---|
 | Runs | `football_adapt/runs/q1/<zeta>_<radius>/s<seed>/` (old names v1–v6 in `runs/q1/README.md`) |
-| Per run | `ckpts/` (a checkpoint per evaluation), `result.json` (test), `vs_formations.txt`, `log.jsonl`, `config.json`, `train.log` |
+| Per run | `ckpts/` (the checkpoints the results use; the other evaluation checkpoints were not kept in the repository), `result.json` (test), `vs_formations.txt`, `log.jsonl`, `config.json`, `train.log` |
 | Index of all runs | `runs/q1/README.md` (`python runs/_tools/index.py q1`) |
 | Averages and learning speed | `runs/q1/summary.json` (`python runs/_tools/q1_summary.py`) |
 | Play-style data | `runs/q1/style.jsonl` (`runs/_tools/style_stats.py`, run on a server) |

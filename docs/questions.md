@@ -1,5 +1,10 @@
 # The three research questions
 
+**Status.** This is the plan written before the study. What was run differs from it in places (for example the Q3
+recurrent teams were warm-started from a trained team, and Q2 used one target formation). Every change, with the
+reason, is listed in the "Changes from the plan" section of `reportQ1.md`, `reportQ2.md` and `reportQ3.md` and in
+Appendix A of the report.
+
 Theme: **structure versus information** in 5-a-side football with limited vision.
 Our team is one parameter-shared learned policy. The opponent is a fixed, hand-coded zonal team.
 Each question is run from scratch (no warm start from earlier trained teams such as v3).
